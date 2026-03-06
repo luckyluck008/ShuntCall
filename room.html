@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ShuntCall - Raum</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <script src="https://cdn.jsdelivr.net/npm/gun/gun.js"></script>
+  <style>
+    body { font-family: system-ui, -apple-system, sans-serif; }
+    .video-grid { 
+      display: grid; 
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); 
+      gap: 1rem;
+      padding: 1rem;
+    }
+    .video-container {
+      position: relative;
+      background: #1a1a2e;
+      border-radius: 12px;
+      overflow: hidden;
+      aspect-ratio: 16/9;
+    }
+    .video-container video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    .video-container.local {
+      border: 2px solid #6366f1;
+    }
+    .video-overlay {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      padding: 0.5rem;
+      background: linear-gradient(transparent, rgba(0,0,0,0.7));
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .peer-name {
+      font-size: 0.875rem;
+      font-weight: 500;
+    }
+    .hop-badge {
+      font-size: 0.625rem;
+      padding: 0.125rem 0.375rem;
+      border-radius: 9999px;
+      background: rgba(99, 102, 241, 0.8);
+    }
+    .status-indicator {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+    }
+    .status-connected { background: #22c55e; }
+    .status-connecting { background: #eab308; }
+    .status-disconnected { background: #ef4444; }
+    .toolbar {
+      position: fixed;
+      bottom: 2rem;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 0.75rem;
+      padding: 0.75rem;
+      background: rgba(0,0,0,0.8);
+      backdrop-filter: blur(10px);
+      border-radius: 9999px;
+      z-index: 100;
+    }
+    .toolbar-btn {
+      width: 3rem;
+      height: 3rem;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s;
+    }
+    .toolbar-btn:hover { transform: scale(1.1); }
+    .toolbar-btn.active { background: #6366f1; }
+    .toolbar-btn.danger { background: #ef4444; }
+    .toolbar-btn.danger:hover { background: #dc2626; }
+  </style>
+</head>
+<body class="bg-gray-900 text-white">
+  
+  <!-- Password Gate -->
+  <div id="passwordGate" class="min-h-screen flex items-center justify-center p-4">
+    <div class="bg-gray-800 rounded-2xl p-8 max-w-md w-full">
+      <h2 class="text-2xl font-bold mb-4">Raum beitreten</h2>
+      <p class="text-gray-400 mb-6">Gib das Passwort ein, um dem Raum beizutreten.</p>
+      <form id="passwordForm" class="space-y-4">
+        <div>
+          <input type="password" id="roomPassword" class="w-full px-4 py-3 bg-gray-700 rounded-lg border border-gray-600" placeholder="Passwort">
+        </div>
+        <button type="submit" class="w-full py-3 bg-indigo-600 rounded-lg font-semibold hover:bg-indigo-700">
+          Beitreten
+        </button>
+      </form>
+      <p id="passwordError" class="text-red-400 mt-4 hidden"></p>
+    </div>
+  </div>
+
+  <!-- Main Room -->
+  <div id="room" class="hidden">
+    
+    <!-- Header -->
+    <header class="fixed top-0 left-0 right-0 z-50 bg-gray-900/80 backdrop-blur-sm p-4">
+      <div class="flex justify-between items-center">
+        <div>
+          <h1 class="text-xl font-bold">ShuntCall</h1>
+          <p class="text-sm text-gray-400">Raum: <span id="roomIdDisplay"></span></p>
+        </div>
+        <div class="flex items-center gap-4">
+          <span id="peerCount" class="text-sm text-gray-400">0 Teilnehmer</span>
+          <button id="toggleDebug" class="px-3 py-1 bg-gray-700 rounded text-sm">Debug (D)</button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Video Grid -->
+    <div class="video-grid pt-20 pb-24" id="videoGrid">
+      <!-- Local Video -->
+      <div class="video-container local" id="localContainer">
+        <video id="localVideo" autoplay muted playsinline></video>
+        <div class="video-overlay">
+          <span class="peer-name">Du</span>
+          <div class="flex items-center gap-2">
+            <span class="status-indicator status-connected"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Toolbar -->
+    <div class="toolbar">
+      <button id="toggleMic" class="toolbar-btn bg-gray-700" title="Mikrofon">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path>
+        </svg>
+      </button>
+      <button id="toggleCamera" class="toolbar-btn bg-gray-700" title="Kamera">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
+        </svg>
+      </button>
+      <button id="toggleScreen" class="toolbar-btn bg-gray-700" title="Bildschirm teilen">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
+        </svg>
+      </button>
+      <button id="togglePiP" class="toolbar-btn bg-gray-700" title="Bild-in-Bild">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16"></path>
+        </svg>
+      </button>
+      <button id="leaveRoom" class="toolbar-btn danger" title="Verlassen">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 8l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2M5 3a2 2 0 00-2 2v1c0 8.284 6.716 15 15 15h1a2 2 0 002-2v-3.28a1 1 0 00-.684-.948l-4.493-1.498a1 1 0 00-1.21.502l-1.13 2.257a11.042 11.042 0 01-5.516-5.517l2.257-1.128a1 1 0 00.502-1.21L9.228 3.683A1 1 0 008.279 3H5z"></path>
+        </svg>
+      </button>
+    </div>
+
+    <!-- Debug Panel -->
+    <div id="debugPanel" class="fixed bottom-24 right-4 bg-gray-800/90 backdrop-blur p-4 rounded-lg text-xs font-mono hidden max-w-sm">
+      <h3 class="font-bold mb-2">Debug Info</h3>
+      <div id="debugContent"></div>
+    </div>
+  </div>
+
+  <script src="js/crypto.js"></script>
+  <script src="js/gun-signaling.js"></script>
+  <script src="js/webrtc.js"></script>
+  <script src="js/relay-tree.js"></script>
+
+  <script>
+    const App = {
+      roomId: null,
+      namespace: null,
+      peerId: null,
+      isHost: false,
+      localStream: null,
+      peers: new Map(),
+      signaling: null,
+      webrtc: null,
+      relayTree: null,
+      isAudioEnabled: true,
+      isVideoEnabled: true,
+
+      async init() {
+        const params = new URLSearchParams(window.location.search);
+        this.roomId = params.get('room');
+        this.namespace = params.get('hash');
+        
+        if (!this.roomId || !this.namespace) {
+          window.location.href = 'index.html';
+          return;
+        }
+
+        document.getElementById('roomIdDisplay').textContent = this.roomId;
+        
+        const isHost = sessionStorage.getItem('shuntcall_isHost') === 'true';
+        if (isHost) {
+          this.isHost = true;
+        }
+
+        this.peerId = ShuntCallCrypto.generatePeerId();
+        
+        await this.initMedia();
+        await this.initSignaling();
+        this.initWebRTC();
+        this.initRelayTree();
+        this.setupEventListeners();
+        
+        document.getElementById('passwordGate').classList.add('hidden');
+        document.getElementById('room').classList.remove('hidden');
+      },
+
+      async initMedia() {
+        try {
+          this.localStream = await navigator.mediaDevices.getUserMedia({
+            video: { width: 1280, height: 720 },
+            audio: true
+          });
+          
+          const localVideo = document.getElementById('localVideo');
+          localVideo.srcObject = this.localStream;
+        } catch (error) {
+          console.error('Error accessing media devices:', error);
+          alert('Kamera/Mikrofon konnte nicht accessiert werden.');
+        }
+      },
+
+      async initSignaling() {
+        this.signaling = await ShuntCallSignaling.init(this.namespace, this.peerId);
+        
+        this.signaling.on('peer:join', async (data) => {
+          await this.handlePeerJoin(data.id);
+        });
+      },
+
+      initWebRTC() {
+        this.webrtc = ShuntCallWebRTC.init(this.localStream, this.peerId, this.signaling);
+        
+        this.webrtc.on('remoteStream', (data) => {
+          this.addRemoteStream(data.peerId, data.stream);
+        });
+        
+        this.webrtc.on('peerDisconnected', (data) => {
+          this.removePeer(data.peerId);
+        });
+        
+        this.webrtc.on('connectionStateChange', (data) => {
+          this.updatePeerStatus(data.peerId, data.state);
+        });
+      },
+
+      initRelayTree() {
+        this.relayTree = ShuntCallRelayTree.init(this.peerId, this.webrtc);
+        
+        this.relayTree.on('peerAdded', (data) => {
+          this.updatePeerCount();
+        });
+        
+        this.relayTree.on('peerRemoved', (data) => {
+          this.updatePeerCount();
+        });
+      },
+
+      async handlePeerJoin(peerId) {
+        console.log('Peer joined:', peerId);
+        
+        this.relayTree.addPeer(peerId);
+        
+        await this.webrtc.createOffer(peerId);
+        
+        setTimeout(async () => {
+          const peers = await this.signaling.getPeers();
+          for (const otherPeerId of peers) {
+            if (otherPeerId !== peerId && !this.peers.has(otherPeerId)) {
+              await this.handlePeerJoin(otherPeerId);
+            }
+          }
+        }, 2000);
+      },
+
+      addRemoteStream(peerId, stream) {
+        if (this.peers.has(peerId)) return;
+        
+        const grid = document.getElementById('videoGrid');
+        
+        const container = document.createElement('div');
+        container.className = 'video-container';
+        container.id = `container-${peerId}`;
+        
+        const video = document.createElement('video');
+        video.autoplay = true;
+        video.playsInline = true;
+        video.srcObject = stream;
+        
+        const overlay = document.createElement('div');
+        overlay.className = 'video-overlay';
+        
+        const hops = this.relayTree.getHops(peerId);
+        
+        overlay.innerHTML = `
+          <span class="peer-name">${peerId.substring(0, 8)}</span>
+          <div class="flex items-center gap-2">
+            <span class="hop-badge">${hops}H</span>
+            <span class="status-indicator status-connecting" id="status-${peerId}"></span>
+          </div>
+        `;
+        
+        container.appendChild(video);
+        container.appendChild(overlay);
+        grid.appendChild(container);
+        
+        this.peers.set(peerId, { stream, container });
+        this.updatePeerCount();
+      },
+
+      removePeer(peerId) {
+        const peer = this.peers.get(peerId);
+        if (peer) {
+          peer.container.remove();
+          this.peers.delete(peerId);
+        }
+        
+        this.relayTree.removePeer(peerId);
+        this.webrtc.closePeerConnection(peerId);
+        this.updatePeerCount();
+      },
+
+      updatePeerStatus(peerId, state) {
+        const statusEl = document.getElementById(`status-${peerId}`);
+        if (statusEl) {
+          statusEl.className = 'status-indicator';
+          if (state === 'connected') {
+            statusEl.classList.add('status-connected');
+          } else if (state === 'connecting' || state === 'new') {
+            statusEl.classList.add('status-connecting');
+          } else {
+            statusEl.classList.add('status-disconnected');
+          }
+        }
+      },
+
+      updatePeerCount() {
+        const count = this.peers.size + 1;
+        document.getElementById('peerCount').textContent = `${count} Teilnehmer`;
+      },
+
+      setupEventListeners() {
+        document.getElementById('passwordForm').addEventListener('submit', async (e) => {
+          e.preventDefault();
+          const password = document.getElementById('roomPassword').value;
+          
+          const encoder = new TextEncoder();
+          const data = encoder.encode(this.roomId + ':' + password);
+          const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+          const hashArray = Array.from(new Uint8Array(hashBuffer));
+          const hash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+          
+          if (hash !== this.namespace) {
+            document.getElementById('passwordError').textContent = 'Falsches Passwort';
+            document.getElementById('passwordError').classList.remove('hidden');
+            return;
+          }
+          
+          this.init();
+        });
+
+        document.getElementById('toggleMic').addEventListener('click', () => {
+          this.isAudioEnabled = !this.isAudioEnabled;
+          this.localStream.getAudioTracks().forEach(track => {
+            track.enabled = this.isAudioEnabled;
+          });
+          document.getElementById('toggleMic').classList.toggle('active', this.isAudioEnabled);
+        });
+
+        document.getElementById('toggleCamera').addEventListener('click', () => {
+          this.isVideoEnabled = !this.isVideoEnabled;
+          this.localStream.getVideoTracks().forEach(track => {
+            track.enabled = this.isVideoEnabled;
+          });
+          document.getElementById('toggleCamera').classList.toggle('active', this.isVideoEnabled);
+        });
+
+        document.getElementById('toggleScreen').addEventListener('click', async () => {
+          try {
+            const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+            const screenTrack = screenStream.getVideoTracks()[0];
+            
+            const videoTrack = this.localStream.getVideoTracks()[0];
+            if (videoTrack) {
+              videoTrack.stop();
+              this.localStream.removeTrack(videoTrack);
+            }
+            
+            this.localStream.addTrack(screenTrack);
+            this.webrtc.addLocalStream(this.localStream);
+            
+            screenTrack.onended = async () => {
+              const newStream = await navigator.mediaDevices.getUserMedia({ video: true });
+              const newVideoTrack = newStream.getVideoTracks()[0];
+              this.localStream.addTrack(newVideoTrack);
+              this.webrtc.addLocalStream(this.localStream);
+            };
+          } catch (error) {
+            console.error('Screen share error:', error);
+          }
+        });
+
+        document.getElementById('togglePiP').addEventListener('click', async () => {
+          const localVideo = document.getElementById('localVideo');
+          try {
+            if (document.pictureInPictureElement) {
+              await document.exitPictureInPicture();
+            } else {
+              await localVideo.requestPictureInPicture();
+            }
+          } catch (error) {
+            console.error('PiP error:', error);
+          }
+        });
+
+        document.getElementById('leaveRoom').addEventListener('click', () => {
+          this.leaveRoom();
+        });
+
+        document.addEventListener('keydown', (e) => {
+          if (e.key === 'd' || e.key === 'D') {
+            document.getElementById('debugPanel').classList.toggle('hidden');
+          }
+        });
+
+        setInterval(() => {
+          this.updateDebugPanel();
+        }, 2000);
+      },
+
+      updateDebugPanel() {
+        const content = document.getElementById('debugContent');
+        const tree = this.relayTree.getTree();
+        const asciiTree = this.relayTree.getAsciiTree();
+        
+        content.innerHTML = `
+          <pre class="whitespace-pre-wrap">${asciiTree}</pre>
+          <div class="mt-2">
+            <strong>Peers:</strong> ${this.peers.size + 1}<br>
+            <strong>Verbindungen:</strong> ${Object.keys(this.webrtc.getAllConnections()).length}
+          </div>
+        `;
+      },
+
+      leaveRoom() {
+        if (this.signaling) {
+          this.signaling.leave();
+        }
+        if (this.webrtc) {
+          this.webrtc.destroy();
+        }
+        if (this.relayTree) {
+          this.relayTree.destroy();
+        }
+        if (this.localStream) {
+          this.localStream.getTracks().forEach(track => track.stop());
+        }
+        window.location.href = 'index.html';
+      }
+    };
+
+    document.addEventListener('DOMContentLoaded', () => {
+      const params = new URLSearchParams(window.location.search);
+      const hasRoom = params.has('room') && params.has('hash');
+      
+      if (hasRoom) {
+        App.init();
+      } else {
+        window.location.href = 'index.html';
+      }
+    });
+  </script>
+</body>
+</html>
