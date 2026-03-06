@@ -116,6 +116,7 @@
           <p class="text-sm text-gray-400">Raum: <span id="roomIdDisplay"></span></p>
         </div>
         <div class="flex items-center gap-4">
+          <button id="copyLink" class="px-3 py-1 bg-gray-700 rounded text-sm" title="Link kopieren">Link</button>
           <span id="peerCount" class="text-sm text-gray-400">0 Teilnehmer</span>
           <button id="toggleDebug" class="px-3 py-1 bg-gray-700 rounded text-sm">Debug (D)</button>
         </div>
@@ -190,6 +191,7 @@
       relayTree: null,
       isAudioEnabled: true,
       isVideoEnabled: true,
+      joinLink: '',
 
       async init() {
         const params = new URLSearchParams(window.location.search);
@@ -201,6 +203,8 @@
           return;
         }
 
+        this.joinLink = `${window.location.origin}${window.location.pathname}?room=${encodeURIComponent(this.roomId)}&hash=${this.namespace}`;
+        
         document.getElementById('roomIdDisplay').textContent = this.roomId;
         
         const isHost = sessionStorage.getItem('shuntcall_isHost') === 'true';
@@ -355,6 +359,14 @@
       },
 
       setupEventListeners() {
+        document.getElementById('copyLink').addEventListener('click', () => {
+          navigator.clipboard.writeText(this.joinLink).then(() => {
+            const btn = document.getElementById('copyLink');
+            btn.textContent = 'Kopiert!';
+            setTimeout(() => btn.textContent = 'Link', 2000);
+          });
+        });
+
         document.getElementById('passwordForm').addEventListener('submit', async (e) => {
           e.preventDefault();
           const password = document.getElementById('roomPassword').value;
