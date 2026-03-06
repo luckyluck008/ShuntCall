@@ -5,8 +5,7 @@
 
 const GUN_PEERS = [
   'https://gun-manhattan.herokuapp.com/gun',
-  'https://gun-eu.herokuapp.com/gun',
-  'https://gun-apac.herokuapp.com/gun'
+  'https://gun-eu.herokuapp.com/gun'
 ];
 
 const ShuntCallSignaling = {
@@ -14,6 +13,9 @@ const ShuntCallSignaling = {
   namespace: null,
   peerId: null,
   listeners: {},
+  knownPeers: new Set(),
+  announceInterval: null,
+  pollInterval: null,
 
   /**
    * Initialize Gun.js with a namespace
@@ -23,6 +25,7 @@ const ShuntCallSignaling = {
   async init(namespace, peerId) {
     this.namespace = namespace;
     this.peerId = peerId;
+    this.knownPeers = new Set();
     
     if (this.gun) {
       this.gun._.opt({ peers: [] });
@@ -38,9 +41,12 @@ const ShuntCallSignaling = {
     this.room = this.gun.get('shuntcall').get(namespace);
     this.peersNode = this.room.get('peers');
     this.signalingNode = this.room.get('signaling');
+    this.announceNode = this.room.get('announce');
 
     await this.registerPeer();
     this.setupPeerDiscovery();
+    this.startAnnounce();
+    this.startPolling();
     
     console.log('ShuntCallSignaling initialized with namespace:', namespace.substring(0, 16) + '...');
     return this;
@@ -53,7 +59,7 @@ const ShuntCallSignaling = {
     const peerData = {
       id: this.peerId,
       timestamp: Date.now(),
-      signaling: true
+      joined: true
     };
     
     this.peersNode.get(this.peerId).put(peerData);
@@ -61,22 +67,87 @@ const ShuntCallSignaling = {
     this.peersNode.get(this.peerId).get('alive').put(true);
     setInterval(() => {
       this.peersNode.get(this.peerId).get('alive').put(true);
-    }, 10000);
+    }, 5000);
+  },
+
+  /**
+   * Announce our presence to the room
+   */
+  startAnnounce() {
+    this.announceNode.get(this.peerId).put({
+      id: this.peerId,
+      timestamp: Date.now()
+    });
+    
+    this.announceInterval = setInterval(() => {
+      this.announceNode.get(this.peerId).put({
+        id: this.peerId,
+        timestamp: Date.now()
+      });
+    }, 3000);
+  },
+
+  /**
+   * Poll for new peers
+   */
+  startPolling() {
+    this.pollInterval = setInterval(async () => {
+      await this.pollPeers();
+    }, 2000);
+    
+    setTimeout(() => this.pollPeers(), 1000);
+  },
+
+  /**
+   * Poll for peers in the room
+   */
+  async pollPeers() {
+    return new Promise((resolve) => {
+      const foundPeers = [];
+      
+      this.peersNode.map().once((data, peerId) => {
+        if (peerId && peerId !== this.peerId && data && data.id) {
+          foundPeers.push(data.id);
+        }
+      });
+      
+      setTimeout(() => {
+        foundPeers.forEach(peerId => {
+          if (!this.knownPeers.has(peerId)) {
+            this.knownPeers.add(peerId);
+            console.log('Discovered peer:', peerId);
+            this.emit('peer:join', { id: peerId });
+            this.setupPeerSignaling(peerId);
+          }
+        });
+        resolve();
+      }, 1500);
+    });
   },
 
   /**
    * Setup peer discovery listener
    */
   setupPeerDiscovery() {
+    this.announceNode.map().on((data, peerId) => {
+      if (!data || !data.id || peerId === this.peerId) return;
+      
+      if (!this.knownPeers.has(data.id)) {
+        this.knownPeers.add(data.id);
+        console.log('Peer announced:', data.id);
+        this.emit('peer:join', { id: data.id });
+      }
+    });
+    
     this.peersNode.map().on((data, peerId) => {
-      if (!data || peerId === this.peerId) return;
+      if (!data || !data.id || peerId === this.peerId) return;
       
-      this.emit('peer:join', {
-        id: peerId,
-        timestamp: data.timestamp
-      });
-      
-      this.setupPeerSignaling(peerId);
+      if (!this.knownPeers.has(data.id)) {
+        this.knownPeers.add(data.id);
+        console.log('Peer joined via peers node:', data.id);
+        this.emit('peer:join', { id: data.id });
+      }
+      this.setupPeerSignaling(data.id);
     });
   },
 
@@ -96,7 +167,9 @@ const ShuntCallSignaling = {
         timestamp: data.timestamp
       });
       
-      peerSignaling.get('offer').put(null);
+      setTimeout(() => {
+        peerSignaling.get('offer').put(null);
+      }, 5000);
     });
     
     peerSignaling.get('answer').on((data) => {
@@ -108,7 +181,9 @@ const ShuntCallSignaling = {
         timestamp: data.timestamp
       });
       
-      peerSignaling.get('answer').put(null);
+      setTimeout(() => {
+        peerSignaling.get('answer').put(null);
+      }, 5000);
     });
     
     peerSignaling.get('ice').on((data) => {
@@ -120,7 +195,9 @@ const ShuntCallSignaling = {
         timestamp: data.timestamp
       });
       
-      peerSignaling.get('ice').put(null);
+      setTimeout(() => {
+        peerSignaling.get('ice').put(null);
+      }, 5000);
     });
   },
 
@@ -136,6 +213,7 @@ const ShuntCallSignaling = {
       timestamp: Date.now()
     };
     
+    console.log('Sending offer to:', targetPeerId);
     this.signalingNode.get(targetPeerId).get('offer').put(offerData);
   },
 
@@ -151,6 +229,7 @@ const ShuntCallSignaling = {
       timestamp: Date.now()
     };
     
+    console.log('Sending answer to:', targetPeerId);
     this.signalingNode.get(targetPeerId).get('answer').put(answerData);
   },
 
@@ -177,11 +256,11 @@ const ShuntCallSignaling = {
     return new Promise((resolve) => {
       const peers = [];
       this.peersNode.map().once((data, peerId) => {
-        if (peerId !== this.peerId && data) {
-          peers.push(peerId);
+        if (peerId && peerId !== this.peerId && data && data.id) {
+          peers.push(data.id);
         }
       });
-      setTimeout(() => resolve(peers), 2000);
+      setTimeout(() => resolve([...this.knownPeers]), 1500);
     });
   },
 
@@ -189,6 +268,12 @@ const ShuntCallSignaling = {
    * Remove ourselves from the room
    */
   async leave() {
+    if (this.announceInterval) clearInterval(this.announceInterval);
+    if (this.pollInterval) clearInterval(this.pollInterval);
+    
+    if (this.announceNode) {
+      this.announceNode.get(this.peerId).put(null);
+    }
     if (this.peersNode) {
       this.peersNode.get(this.peerId).put(null);
     }

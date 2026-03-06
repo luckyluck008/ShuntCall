@@ -219,6 +219,7 @@
         this.initWebRTC();
         this.initRelayTree();
         this.setupEventListeners();
+        this.pollForPeers();
         
         document.getElementById('passwordGate').classList.add('hidden');
         document.getElementById('room').classList.remove('hidden');
@@ -243,8 +244,19 @@
         this.signaling = await ShuntCallSignaling.init(this.namespace, this.peerId);
         
         this.signaling.on('peer:join', async (data) => {
+          console.log('Received peer:join event for:', data.id);
           await this.handlePeerJoin(data.id);
         });
+        
+        setTimeout(async () => {
+          const existingPeers = await this.signaling.getPeers();
+          console.log('Existing peers found:', existingPeers);
+          for (const peerId of existingPeers) {
+            if (peerId !== this.peerId) {
+              await this.handlePeerJoin(peerId);
+            }
+          }
+        }, 2000);
       },
 
       initWebRTC() {
@@ -278,18 +290,26 @@
       async handlePeerJoin(peerId) {
         console.log('Peer joined:', peerId);
         
+        if (this.peers.has(peerId)) return;
+        
         this.relayTree.addPeer(peerId);
         
-        await this.webrtc.createOffer(peerId);
-        
         setTimeout(async () => {
+          console.log('Initiating connection to:', peerId);
+          await this.webrtc.createOffer(peerId);
+        }, 500);
+      },
+
+      async pollForPeers() {
+        setInterval(async () => {
           const peers = await this.signaling.getPeers();
-          for (const otherPeerId of peers) {
-            if (otherPeerId !== peerId && !this.peers.has(otherPeerId)) {
-              await this.handlePeerJoin(otherPeerId);
+          for (const peerId of peers) {
+            if (!this.peers.has(peerId) && peerId !== this.peerId) {
+              console.log('Polled peer:', peerId);
+              await this.handlePeerJoin(peerId);
             }
           }
-        }, 2000);
+        }, 3000);
       },
 
       addRemoteStream(peerId, stream) {

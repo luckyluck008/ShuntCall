@@ -15,7 +15,8 @@ const ShuntCallWebRTC = {
   signaling: null,
   config: {
     iceServers: ICE_SERVERS,
-    iceCandidatePoolSize: 10
+    iceCandidatePoolSize: 10,
+    iceTransportPolicy: 'all'
   },
   listeners: {},
 
