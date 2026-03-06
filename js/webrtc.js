@@ -103,6 +103,8 @@ const ShuntCallWebRTC = {
    * @param {RTCSessionDescriptionInit} sdp - SDP offer
    */
   async handleOffer(fromPeerId, sdp) {
+    console.log('Handling offer from:', fromPeerId);
+    
     let pc = this.peerConnections[fromPeerId];
     if (!pc) {
       pc = this.createPeerConnection(fromPeerId);
@@ -113,7 +115,15 @@ const ShuntCallWebRTC = {
     const answer = await pc.createAnswer();
     await pc.setLocalDescription(answer);
     
+    console.log('Sending answer to:', fromPeerId);
     this.signaling.sendAnswer(fromPeerId, answer);
+    
+    pc.onicecandidate = (event) => {
+      if (event.candidate) {
+        console.log('Sending ICE to:', fromPeerId);
+        this.signaling.sendIceCandidate(fromPeerId, event.candidate);
+      }
+    };
   },
 
   /**
@@ -155,6 +165,8 @@ const ShuntCallWebRTC = {
    * @param {string} remotePeerId - Target peer ID
    */
   async createOffer(remotePeerId) {
+    console.log('Creating offer for:', remotePeerId);
+    
     let pc = this.peerConnections[remotePeerId];
     if (!pc) {
       pc = this.createPeerConnection(remotePeerId);
@@ -163,7 +175,15 @@ const ShuntCallWebRTC = {
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
     
+    console.log('Sending offer to:', remotePeerId);
     this.signaling.sendOffer(remotePeerId, offer);
+    
+    pc.onicecandidate = (event) => {
+      if (event.candidate) {
+        console.log('Sending ICE to:', remotePeerId);
+        this.signaling.sendIceCandidate(remotePeerId, event.candidate);
+      }
+    };
   },
 
   /**

@@ -290,14 +290,15 @@
       async handlePeerJoin(peerId) {
         console.log('Peer joined:', peerId);
         
-        if (this.peers.has(peerId)) return;
+        if (this.peers.has(peerId)) {
+          console.log('Peer already connected:', peerId);
+          return;
+        }
         
         this.relayTree.addPeer(peerId);
         
-        setTimeout(async () => {
-          console.log('Initiating connection to:', peerId);
-          await this.webrtc.createOffer(peerId);
-        }, 500);
+        console.log('Initiating connection to:', peerId);
+        await this.webrtc.createOffer(peerId);
       },
 
       async pollForPeers() {
