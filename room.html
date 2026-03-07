@@ -171,6 +171,14 @@
   <script src="js/relay-tree.js"></script>
 
   <script>
+    // Security check for getUserMedia
+    (function() {
+      const isSecure = window.location.protocol === 'https:' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+      if (!isSecure) {
+        document.write('<div style="background:#ef4444;color:white;padding:1rem;text-align:center;font-weight:bold;">⚠️ HTTPS erforderlich! Bitte öffne diese Seite über https:// oder localhost</div>');
+      }
+    })();
+
     const App = {
       roomId: null,
       namespace: null,
@@ -287,17 +295,90 @@
       },
 
       async initMedia() {
+        // Check HTTPS/Localhost requirement first
+        const isSecure = window.location.protocol === 'https:' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+        
+        if (!isSecure) {
+          console.error('SECURITY: getUserMedia requires HTTPS or localhost');
+          alert('Kamera-Zugriff erfordert HTTPS oder localhost!\n\nAktueller Status: ' + window.location.protocol + '//' + window.location.hostname + '\n\nBitte nutze https:// oder localhost/ um diese App zu öffnen.');
+          return;
+        }
+        
         try {
-          this.localStream = await navigator.mediaDevices.getUserMedia({
-            video: { width: 1280, height: 720 },
+          // First, enumerate and log all available devices
+          const devices = await navigator.mediaDevices.enumerateDevices();
+          const videoDevices = devices.filter(d => d.kind === 'videoinput');
+          const audioDevices = devices.filter(d => d.kind === 'audioinput');
+          
+          console.log('=== MEDIA DEVICES DEBUG ===');
+          console.log('Protocol:', window.location.protocol);
+          console.log('Hostname:', window.location.hostname);
+          console.log('Total devices:', devices.length);
+          console.log('Video devices:', videoDevices.length);
+          console.log('Audio devices:', audioDevices.length);
+          videoDevices.forEach((d, i) => console.log(`  Video ${i}:`, d.label || '(no label)', d.deviceId));
+          audioDevices.forEach((d, i) => console.log(`  Audio ${i}:`, d.label || '(no label)', d.deviceId));
+          console.log('============================');
+          
+          if (videoDevices.length === 0) {
+            alert('Keine Kamera gefunden. Bitte schließe eine Kamera an.');
+            return;
+          }
+          
+          // Try with flexible constraints - start simple
+          const constraints = {
+            video: true,
             audio: true
-          });
+          };
+          
+          console.log('Requesting getUserMedia with:', JSON.stringify(constraints));
+          
+          this.localStream = await navigator.mediaDevices.getUserMedia(constraints);
+          
+          console.log('getUserMedia SUCCESS! Stream:', this.localStream.id);
+          console.log('Video tracks:', this.localStream.getVideoTracks().length);
+          console.log('Audio tracks:', this.localStream.getAudioTracks().length);
           
           const localVideo = document.getElementById('localVideo');
           localVideo.srcObject = this.localStream;
+          
+          // Log track details
+          this.localStream.getVideoTracks().forEach(track => {
+            console.log('Video track:', track.label, track.settings);
+          });
+          this.localStream.getAudioTracks().forEach(track => {
+            console.log('Audio track:', track.label, track.settings);
+          });
+          
         } catch (error) {
-          console.error('Error accessing media devices:', error);
-          alert('Kamera/Mikrofon konnte nicht accessiert werden.');
+          console.error('=== MEDIA ERROR ===');
+          console.error('Error name:', error.name);
+          console.error('Error message:', error.message);
+          console.error('Error constraint:', error.constraint);
+          console.error('Full error:', error);
+          console.error('====================');
+          
+          // Try to get more info
+          try {
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            console.log('Devices at error time:', devices.filter(d => d.kind === 'videoinput').map(d => d.label));
+          } catch(e) {}
+          
+          let msg = 'Kamera/Mikrofon konnte nicht accessiert werden';
+          
+          if (error.name === 'NotAllowedError') {
+            msg = 'Zugriff verweigert. Bitte erlaube Kamera/Mikrofon im Browser.';
+          } else if (error.name === 'NotFoundError') {
+            msg = 'Keine Kamera/Mikrofon gefunden.';
+          } else if (error.name === 'NotReadableError') {
+            msg = 'Kamera wird von einer anderen App verwendet.';
+          } else if (error.name === 'OverconstrainedError') {
+            msg = 'Die angeforderte Auflösung wird nicht unterstützt.';
+          } else if (error.name === 'AbortError') {
+            msg = 'Verbindung zur Kamera wurde abgebrochen.';
+          }
+          
+          alert(msg + '\n\nFehler: ' + error.name + '\n' + error.message + '\n\nBitte öffne die Browser-Konsole (F12) für mehr Details!');
         }
       },
 

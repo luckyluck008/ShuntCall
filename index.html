@@ -120,6 +120,14 @@
   </div>
 
   <script>
+    // Security check for getUserMedia
+    (function() {
+      const isSecure = window.location.protocol === 'https:' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+      if (!isSecure) {
+        document.write('<div style="background:#ef4444;color:white;padding:1rem;text-align:center;font-weight:bold;">⚠️ HTTPS erforderlich! Bitte öffne diese Seite über https:// oder localhost</div>');
+      }
+    })();
+
     function generateRoomId() {
       const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
       let result = '';
@@ -164,8 +172,27 @@
       document.getElementById('loadingSection').classList.remove('hidden');
 
       try {
+        // Check HTTPS/Localhost requirement first
+        const isSecure = window.location.protocol === 'https:' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+        
+        if (!isSecure) {
+          throw new Error('SECURITY_ERROR: getUserMedia requires HTTPS or localhost. Current: ' + window.location.protocol + '//' + window.location.hostname);
+        }
+        
+        console.log('=== MEDIA DEBUG ===');
+        console.log('Protocol:', window.location.protocol);
+        console.log('Hostname:', window.location.hostname);
+        
+        // First enumerate devices
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const videoDevices = devices.filter(d => d.kind === 'videoinput');
+        const audioDevices = devices.filter(d => d.kind === 'audioinput');
+        
+        console.log('Devices found:', { video: videoDevices.length, audio: audioDevices.length });
+        console.log('==================');
+        
         const localStream = await navigator.mediaDevices.getUserMedia({
-          video: { width: 640, height: 480 },
+          video: true,
           audio: true
         });
 
@@ -181,14 +208,23 @@
         document.getElementById('shareSection').classList.remove('hidden');
 
       } catch (error) {
-        console.error('Error creating room:', error);
+        console.error('=== ROOM ERROR ===');
+        console.error('Error:', error);
+        console.error('==================');
+        
         let msg = 'Kamera/Mikrofon konnte nicht accessiert werden';
-        if (error.name === 'NotAllowedError') {
-          msg = 'Zugriff verweigert. Bitte erlaube Kamera/Mikrofon im Browser.';
+        if (error.name === 'NotAllowedError' || error.message?.includes('SECURITY_ERROR')) {
+          msg = 'Zugriff verweigert. Bitte erlaube Kamera/Mikrofon im Browser und nutze HTTPS oder localhost.';
         } else if (error.name === 'NotFoundError') {
-          msg = 'Keine Kamera/Mikrofon gefunden.';
+          msg = 'Keine Kamera/Mikrofon gefunden. Bitte schließe andere Apps, die die Kamera nutzen.';
+        } else if (error.name === 'NotReadableError') {
+          msg = 'Kamera wird von einer anderen App verwendet.';
+        } else if (error.name === 'OverconstrainedError') {
+          msg = 'Die angeforderten Medienkonfiguration wird nicht unterstützt.';
+        } else if (error.name === 'AbortError') {
+          msg = 'Verbindung zur Kamera wurde abgebrochen.';
         }
-        showError(msg);
+        showError(msg + ' (' + error.name + ')');
         document.getElementById('loadingSection').classList.add('hidden');
         document.getElementById('createForm').classList.remove('hidden');
       }
