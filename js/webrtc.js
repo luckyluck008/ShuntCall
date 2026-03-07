@@ -13,10 +13,10 @@ const ShuntCallWebRTC = {
   localStream: null,
   peerId: null,
   signaling: null,
+  pendingIceCandidates: {},
   config: {
     iceServers: ICE_SERVERS,
-    iceCandidatePoolSize: 10,
-    iceTransportPolicy: 'all'
+    iceCandidatePoolSize: 10
   },
   listeners: {},
 
@@ -30,6 +30,7 @@ const ShuntCallWebRTC = {
     this.localStream = localStream;
     this.peerId = peerId;
     this.signaling = signaling;
+    this.pendingIceCandidates = {};
     
     this.setupSignalingListeners();
     console.log('ShuntCallWebRTC initialized');
@@ -41,14 +42,17 @@ const ShuntCallWebRTC = {
    */
   setupSignalingListeners() {
     this.signaling.on('offer', async (data) => {
+      console.log('Received offer event from:', data.from);
       await this.handleOffer(data.from, JSON.parse(data.sdp));
     });
     
     this.signaling.on('answer', async (data) => {
+      console.log('Received answer event from:', data.from);
       await this.handleAnswer(data.from, JSON.parse(data.sdp));
     });
     
     this.signaling.on('ice', async (data) => {
+      console.log('Received ICE event from:', data.from);
       await this.handleIceCandidate(data.from, JSON.parse(data.candidate));
     });
   },
@@ -65,6 +69,7 @@ const ShuntCallWebRTC = {
     pc.connectionState = 'new';
     pc.reconnectAttempts = 0;
     pc.maxReconnectAttempts = 3;
+    this.pendingIceCandidates[remotePeerId] = [];
     
     if (this.localStream) {
       this.localStream.getTracks().forEach(track => {
@@ -74,11 +79,13 @@ const ShuntCallWebRTC = {
     
     pc.onicecandidate = (event) => {
       if (event.candidate) {
+        console.log('ICE candidate generated for:', remotePeerId);
         this.signaling.sendIceCandidate(remotePeerId, event.candidate);
       }
     };
     
     pc.ontrack = (event) => {
+      console.log('Track received from:', remotePeerId);
       this.emit('remoteStream', {
         peerId: remotePeerId,
         stream: event.streams[0]
@@ -94,6 +101,7 @@ const ShuntCallWebRTC = {
     };
     
     this.peerConnections[remotePeerId] = pc;
+    console.log('Peer connection created for:', remotePeerId);
     return pc;
   },
 
@@ -103,7 +111,7 @@ const ShuntCallWebRTC = {
    * @param {RTCSessionDescriptionInit} sdp - SDP offer
    */
   async handleOffer(fromPeerId, sdp) {
-    console.log('Handling offer from:', fromPeerId);
+    console.log('Processing offer from:', fromPeerId);
     
     let pc = this.peerConnections[fromPeerId];
     if (!pc) {
@@ -111,19 +119,15 @@ const ShuntCallWebRTC = {
     }
     
     await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+    console.log('Remote description set for offer');
+    
+    this.processPendingIceCandidates(fromPeerId);
     
     const answer = await pc.createAnswer();
     await pc.setLocalDescription(answer);
     
     console.log('Sending answer to:', fromPeerId);
     this.signaling.sendAnswer(fromPeerId, answer);
-    
-    pc.onicecandidate = (event) => {
-      if (event.candidate) {
-        console.log('Sending ICE to:', fromPeerId);
-        this.signaling.sendIceCandidate(fromPeerId, event.candidate);
-      }
-    };
   },
 
   /**
@@ -132,13 +136,18 @@ const ShuntCallWebRTC = {
    * @param {RTCSessionDescriptionInit} sdp - SDP answer
    */
   async handleAnswer(fromPeerId, sdp) {
+    console.log('Processing answer from:', fromPeerId);
+    
     const pc = this.peerConnections[fromPeerId];
     if (!pc) {
-      console.warn('No peer connection found for:', fromPeerId);
+      console.warn('No peer connection for answer:', fromPeerId);
       return;
     }
     
     await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+    console.log('Remote description set for answer');
+    
+    this.processPendingIceCandidates(fromPeerId);
   },
 
   /**
@@ -147,17 +156,53 @@ const ShuntCallWebRTC = {
    * @param {RTCIceCandidateInit} candidate - ICE candidate
    */
   async handleIceCandidate(fromPeerId, candidate) {
+    console.log('Processing ICE from:', fromPeerId);
+    
     const pc = this.peerConnections[fromPeerId];
     if (!pc) {
-      console.warn('No peer connection found for:', fromPeerId);
+      console.log('No PC yet, buffering ICE for:', fromPeerId);
+      if (!this.pendingIceCandidates[fromPeerId]) {
+        this.pendingIceCandidates[fromPeerId] = [];
+      }
+      this.pendingIceCandidates[fromPeerId].push(candidate);
       return;
     }
     
-    try {
-      await pc.addIceCandidate(new RTCIceCandidate(candidate));
-    } catch (error) {
-      console.error('Error adding ICE candidate:', error);
+    if (pc.remoteDescription) {
+      try {
+        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+        console.log('ICE candidate added for:', fromPeerId);
+      } catch (error) {
+        console.error('Error adding ICE candidate:', error);
+      }
+    } else {
+      console.log('No remote description, buffering ICE');
+      if (!this.pendingIceCandidates[fromPeerId]) {
+        this.pendingIceCandidates[fromPeerId] = [];
+      }
+      this.pendingIceCandidates[fromPeerId].push(candidate);
     }
+  },
+
+  /**
+   * Process buffered ICE candidates
+   */
+  async processPendingIceCandidates(peerId) {
+    const pc = this.peerConnections[peerId];
+    if (!pc || !this.pendingIceCandidates[peerId]) return;
+    
+    const candidates = this.pendingIceCandidates[peerId];
+    console.log('Processing', candidates.length, 'buffered ICE candidates');
+    
+    for (const candidate of candidates) {
+      try {
+        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+      } catch (error) {
+        console.error('Error adding buffered ICE:', error);
+      }
+    }
+    
+    this.pendingIceCandidates[peerId] = [];
   },
 
   /**
@@ -177,13 +222,6 @@ const ShuntCallWebRTC = {
     
     console.log('Sending offer to:', remotePeerId);
     this.signaling.sendOffer(remotePeerId, offer);
-    
-    pc.onicecandidate = (event) => {
-      if (event.candidate) {
-        console.log('Sending ICE to:', remotePeerId);
-        this.signaling.sendIceCandidate(remotePeerId, event.candidate);
-      }
-    };
   },
 
   /**
@@ -265,6 +303,7 @@ const ShuntCallWebRTC = {
     if (pc) {
       pc.close();
       delete this.peerConnections[peerId];
+      delete this.pendingIceCandidates[peerId];
     }
   },
 
