@@ -182,7 +182,13 @@
 
       } catch (error) {
         console.error('Error creating room:', error);
-        showError('Kamera/Mikrofon konnte nicht accessiert werden');
+        let msg = 'Kamera/Mikrofon konnte nicht accessiert werden';
+        if (error.name === 'NotAllowedError') {
+          msg = 'Zugriff verweigert. Bitte erlaube Kamera/Mikrofon im Browser.';
+        } else if (error.name === 'NotFoundError') {
+          msg = 'Keine Kamera/Mikrofon gefunden.';
+        }
+        showError(msg);
         document.getElementById('loadingSection').classList.add('hidden');
         document.getElementById('createForm').classList.remove('hidden');
       }
