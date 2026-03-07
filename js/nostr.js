@@ -4,9 +4,11 @@
  */
 
 const NostrRelays = [
-  'wss://relay.damus.io',
   'wss://nos.lol',
-  'wss://relay.nostr.band'
+  'wss://relay.damus.io',
+  'wss://relay.nostr.band',
+  'wss://brb.io',
+  'wss://njump.me'
 ];
 
 const Nostr = {
@@ -143,15 +145,18 @@ const Nostr = {
   handleMessage(msg) {
     if (!msg || !Array.isArray(msg)) return;
     
-    const [type, subId, data] = msg;
+    const [type, ...rest] = msg;
     
     if (type === 'EVENT') {
-      console.log('Nostr: Got EVENT for sub', subId, 'kind:', data?.kind, 'tags:', data?.tags);
+      const subId = rest[0];
+      const data = rest[1];
+      console.log('Nostr: Got EVENT for sub', subId, 'kind:', data?.kind);
       const subscription = this.subscriptions[subId];
       if (subscription) {
         subscription.callback(data);
       }
     } else if (type === 'EOSE') {
+      const subId = rest[0];
       console.log('Nostr: Got EOSE for sub', subId);
       const subscription = this.subscriptions[subId];
       if (subscription) {
@@ -160,8 +165,10 @@ const Nostr = {
           subscription.onEose();
         }
       }
-    } else {
-      console.log('Nostr: Unknown message type:', type);
+    } else if (type === 'OK') {
+      console.log('Nostr: OK message:', rest);
+    } else if (type === 'NOTICE') {
+      console.log('Nostr: NOTICE:', rest);
     }
   },
 

@@ -191,6 +191,32 @@ const ShuntCallWebRTC = {
     await this.waitForIceGathering(pc);
     
     await this.signaling.broadcastOffer(offer);
+    
+    // Re-broadcast offer every 10 seconds until we have connections
+    let attempts = 0;
+    const maxAttempts = 6; // Try for 60 seconds
+    const interval = setInterval(() => {
+      const connections = Object.keys(this.peerConnections);
+      console.log('Current connections:', connections.length);
+      
+      // If we have connections other than 'broadcast', stop broadcasting
+      const realConnections = connections.filter(id => id !== 'broadcast');
+      if (realConnections.length > 0) {
+        console.log('Have connections, stopping broadcast');
+        clearInterval(interval);
+        return;
+      }
+      
+      if (attempts >= maxAttempts) {
+        console.log('Max broadcast attempts reached');
+        clearInterval(interval);
+        return;
+      }
+      
+      attempts++;
+      console.log('Re-broadcasting offer, attempt', attempts);
+      this.signaling.broadcastOffer(pc.localDescription);
+    }, 10000);
   },
 
   handleConnectionStateChange(pc) {
