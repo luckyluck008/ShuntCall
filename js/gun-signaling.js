@@ -1,9 +1,12 @@
 /**
  * Gun.js Signaling Module
- * Simple and reliable peer discovery and WebRTC signaling
+ * Reliable peer discovery and WebRTC signaling with retries
  */
 
-const GUN_PEERS = ['https://gun-manhattan.herokuapp.com/gun'];
+const GUN_PEERS = [
+  'https://gun-manhattan.herokuapp.com/gun',
+  'https://gun-eu.herokuapp.com/gun'
+];
 
 const ShuntCallSignaling = {
   gun: null,
@@ -11,15 +14,18 @@ const ShuntCallSignaling = {
   peerId: null,
   listeners: {},
   connectedPeers: new Map(),
+  sentMessages: new Map(),
   
   async init(namespace, peerId) {
     this.namespace = namespace;
     this.peerId = peerId;
     this.connectedPeers = new Map();
+    this.sentMessages = new Map();
     
-    this.gun = Gun(GUN_PEERS[0]);
+    this.gun = Gun(GUN_PEERS);
     this.room = this.gun.get('shuntcall').get(namespace);
-    this.myNode = this.room.get('peers').get(peerId);
+    this.peersNode = this.room.get('peers');
+    this.myNode = this.peersNode.get(peerId);
     this.signaling = this.room.get('signaling');
     
     this.myNode.put({ id: peerId, time: Date.now() });
@@ -29,7 +35,7 @@ const ShuntCallSignaling = {
     
     setInterval(() => {
       this.myNode.put({ id: this.peerId, time: Date.now() });
-    }, 5000);
+    }, 3000);
     
     console.log('Signaling ready:', peerId);
     return this;
@@ -37,7 +43,7 @@ const ShuntCallSignaling = {
   
   pollForPeers() {
     setInterval(() => {
-      this.room.get('peers').map().once((data, id) => {
+      this.peersNode.map().once((data, id) => {
         if (id && id !== this.peerId && data && data.id) {
           if (!this.connectedPeers.has(data.id)) {
             this.connectedPeers.set(data.id, true);
@@ -50,54 +56,68 @@ const ShuntCallSignaling = {
   },
   
   setupListeners() {
-    this.signaling.get(this.peerId).get('offer').on((data) => {
-      if (data && data.from && data.sdp) {
-        console.log('Got offer from:', data.from);
-        this.emit('offer', { from: data.from, sdp: data.sdp });
+    const offerNode = this.signaling.get(this.peerId).get('offer');
+    offerNode.map().on((data, key) => {
+      if (data && data.from && data.sdp && data.time > Date.now() - 10000) {
+        if (!this.sentMessages.has(`offer-${data.from}`) || this.sentMessages.get(`offer-${data.from}`) < data.time) {
+          console.log('Got offer from:', data.from);
+          this.sentMessages.set(`offer-${data.from}`, data.time);
+          this.emit('offer', { from: data.from, sdp: data.sdp });
+        }
       }
     });
     
-    this.signaling.get(this.peerId).get('answer').on((data) => {
-      if (data && data.from && data.sdp) {
-        console.log('Got answer from:', data.from);
-        this.emit('answer', { from: data.from, sdp: data.sdp });
+    const answerNode = this.signaling.get(this.peerId).get('answer');
+    answerNode.map().on((data, key) => {
+      if (data && data.from && data.sdp && data.time > Date.now() - 10000) {
+        if (!this.sentMessages.has(`answer-${data.from}`) || this.sentMessages.get(`answer-${data.from}`) < data.time) {
+          console.log('Got answer from:', data.from);
+          this.sentMessages.set(`answer-${data.from}`, data.time);
+          this.emit('answer', { from: data.from, sdp: data.sdp });
+        }
       }
     });
     
-    this.signaling.get(this.peerId).get('ice').on((data) => {
-      if (data && data.from && data.candidate) {
+    const iceNode = this.signaling.get(this.peerId).get('ice');
+    iceNode.map().on((data, key) => {
+      if (data && data.from && data.candidate && data.time > Date.now() - 5000) {
         this.emit('ice', { from: data.from, candidate: data.candidate });
       }
     });
   },
   
-  async sendOffer(targetId, sdp) {
+  sendOffer(targetId, sdp) {
     console.log('Sending offer to:', targetId);
-    this.signaling.get(targetId).get('offer').put({
-      from: this.peerId,
-      sdp: JSON.stringify(sdp)
-    });
+    const msg = { from: this.peerId, sdp: JSON.stringify(sdp), time: Date.now() };
+    
+    for (let i = 0; i < 3; i++) {
+      setTimeout(() => {
+        this.signaling.get(targetId).get('offer').set(msg);
+      }, i * 500);
+    }
   },
   
-  async sendAnswer(targetId, sdp) {
+  sendAnswer(targetId, sdp) {
     console.log('Sending answer to:', targetId);
-    this.signaling.get(targetId).get('answer').put({
-      from: this.peerId,
-      sdp: JSON.stringify(sdp)
-    });
+    const msg = { from: this.peerId, sdp: JSON.stringify(sdp), time: Date.now() };
+    
+    for (let i = 0; i < 3; i++) {
+      setTimeout(() => {
+        this.signaling.get(targetId).get('answer').set(msg);
+      }, i * 500);
+    }
   },
   
-  async sendIceCandidate(targetId, candidate) {
-    this.signaling.get(targetId).get('ice').put({
-      from: this.peerId,
-      candidate: JSON.stringify(candidate)
-    });
+  sendIceCandidate(targetId, candidate) {
+    const msg = { from: this.peerId, candidate: JSON.stringify(candidate), time: Date.now() };
+    
+    this.signaling.get(targetId).get('ice').set(msg);
   },
   
   async getPeers() {
     return new Promise((resolve) => {
       const peers = [];
-      this.room.get('peers').map().once((data, id) => {
+      this.peersNode.map().once((data, id) => {
         if (id && id !== this.peerId && data && data.id) {
           peers.push(data.id);
         }

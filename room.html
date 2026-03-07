@@ -310,6 +310,15 @@
               await this.handlePeerJoin(peerId);
             }
           }
+          
+          const conns = this.webrtc.getAllConnections();
+          for (const [peerId, pc] of Object.entries(conns)) {
+            if (pc.connectionState === 'new' || pc.connectionState === 'checking') {
+              console.log('Retrying connection to:', peerId);
+              this.webrtc.closePeerConnection(peerId);
+              await this.handlePeerJoin(peerId);
+            }
+          }
         }, 3000);
       },
 
