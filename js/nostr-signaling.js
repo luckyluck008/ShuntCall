@@ -35,12 +35,16 @@ const NostrSignaling = {
   },
 
   setupSubscriptions() {
+    // Nostr filter format: #t should be array of arrays
     const filters = {
       kinds: [EVENT_KIND],
-      '#t': [this.roomTag]
+      '#t': [[this.roomTag]]
     };
 
+    console.log('NostrSignaling: Subscribing with filters', filters);
+    
     this.nostr.subscribe('room-' + this.roomTag, filters, (event) => {
+      console.log('NostrSignaling: Received event from', event.pubkey?.slice(0, 16), 'content type:', event.content ? JSON.parse(event.content).type : 'none');
       this.handleIncomingEvent(event);
     });
   },
@@ -77,6 +81,7 @@ const NostrSignaling = {
   },
 
   async sendOffer(targetPubkey, sdp) {
+    console.log('NostrSignaling: Sending offer to', targetPubkey?.slice(0, 16));
     const payload = {
       type: 'offer',
       sdp: sdp,
@@ -93,6 +98,7 @@ const NostrSignaling = {
   },
 
   async sendAnswer(targetPubkey, sdp, offerEventId) {
+    console.log('NostrSignaling: Sending answer to', targetPubkey?.slice(0, 16));
     const payload = {
       type: 'answer',
       sdp: sdp,
@@ -111,6 +117,7 @@ const NostrSignaling = {
   },
 
   async broadcastOffer(sdp) {
+    console.log('NostrSignaling: Broadcasting offer to room');
     const payload = {
       type: 'offer',
       sdp: sdp,
@@ -122,7 +129,7 @@ const NostrSignaling = {
     ];
 
     await this.nostr.publish(EVENT_KIND, tags, JSON.stringify(payload));
-    console.log('NostrSignaling: Broadcast offer to room');
+    console.log('NostrSignaling: Broadcast offer sent');
   },
 
   on(event, callback) {
