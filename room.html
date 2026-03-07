@@ -230,14 +230,25 @@
       setupPasswordModal() {
         // Check if password is in sessionStorage (when creator joins their own room)
         const storedPassword = sessionStorage.getItem('shuntcall_password');
-        if (storedPassword) {
+        const storedRoomId = sessionStorage.getItem('shuntcall_roomId');
+        
+        console.log('Stored password:', storedPassword ? 'yes' : 'no');
+        console.log('Stored roomId:', storedRoomId);
+        
+        if (storedPassword && storedRoomId === this.roomId) {
+          console.log('Using stored password');
           this.password = storedPassword;
           sessionStorage.removeItem('shuntcall_roomId');
           sessionStorage.removeItem('shuntcall_password');
+          // Hide modal first, then init
+          document.getElementById('passwordModal').style.display = 'none';
           this.initRoom();
           return;
         }
 
+        // Show the modal if no stored password
+        document.getElementById('passwordModal').style.display = 'flex';
+        
         const modal = document.getElementById('passwordModal');
         const input = document.getElementById('roomPassword');
         const submit = document.getElementById('submitPassword');
@@ -252,6 +263,7 @@
           }
           
           this.password = password;
+          document.getElementById('passwordModal').style.display = 'none';
           await this.initRoom();
         });
 
