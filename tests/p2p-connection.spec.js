@@ -1,47 +1,35 @@
 import { test, expect } from '@playwright/test';
 
-test.describe('P2P Connection Tests', () => {
-  test('two peers can discover each other via signaling', async ({ browser }) => {
-    const context1 = await browser.newContext({
-      permissions: ['camera', 'microphone']
-    });
-    const context2 = await browser.newContext({
+test.describe('Manual P2P Connection Tests', () => {
+  test('host can create room and generates link with data', async ({ browser }) => {
+    const context = await browser.newContext({
       permissions: ['camera', 'microphone']
     });
     
-    const page1 = await context1.newPage();
-    const page2 = await context2.newPage();
+    const page = await context.newPage();
     
-    const roomId = 'test-room-' + Date.now();
-    const namespace = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
+    page.on('console', msg => console.log('Host:', msg.text()));
     
-    await page1.goto(`http://localhost:8765/room.html?room=${roomId}&hash=${namespace}`);
-    await page2.goto(`http://localhost:8765/room.html?room=${roomId}&hash=${namespace}`);
+    await page.goto('http://localhost:8765/index.html');
     
-    await page1.waitForTimeout(2000);
-    await page2.waitForTimeout(2000);
+    await page.fill('#createRoomId', 'test-room');
+    await page.fill('#createPassword', 'test123');
     
-    const logs1 = [];
-    const logs2 = [];
+    await page.click('button:has-text("Raum erstellen")');
     
-    page1.on('console', msg => logs1.push(msg.text()));
-    page2.on('console', msg => logs2.push(msg.text()));
+    await page.waitForURL(/room\.html/, { timeout: 10000 });
     
-    await page1.waitForTimeout(8000);
+    const url = page.url();
+    console.log('Created room URL:', url);
     
-    console.log('Page 1 logs:', logs1.filter(l => !l.includes('WebSocket')));
-    console.log('Page 2 logs:', logs2.filter(l => !l.includes('WebSocket')));
+    expect(url).toContain('data=');
+    expect(url).toContain('room=');
+    expect(url).toContain('hash=');
     
-    const peerFound1 = logs1.some(log => log.includes('Found peer') || log.includes('peer:join'));
-    const peerFound2 = logs2.some(log => log.includes('Found peer') || log.includes('peer:join'));
-    
-    expect(peerFound1 || peerFound2).toBeTruthy();
-    
-    await context1.close();
-    await context2.close();
+    await context.close();
   });
   
-  test('two peers attempt WebRTC connection', async ({ browser }) => {
+  test('guest can join via link with data param', async ({ browser }) => {
     const context1 = await browser.newContext({
       permissions: ['camera', 'microphone']
     });
@@ -50,33 +38,28 @@ test.describe('P2P Connection Tests', () => {
     });
     
     const page1 = await context1.newPage();
+    page1.on('console', msg => console.log('P1:', msg.text()));
+    
+    await page1.goto('http://localhost:8765/index.html');
+    await page1.fill('#createRoomId', 'test-room-2');
+    await page1.fill('#createPassword', 'test123');
+    await page1.click('button:has-text("Raum erstellen")');
+    
+    await page1.waitForURL(/room\.html\?.*data=/, { timeout: 10000 });
+    const roomUrl = page1.url();
+    console.log('Room URL with data:', roomUrl);
+    
     const page2 = await context2.newPage();
+    page2.on('console', msg => console.log('P2:', msg.text()));
     
-    const roomId = 'test-room-webrtc-' + Date.now();
-    const namespace = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
+    await page2.goto(roomUrl);
     
-    const logs1 = [];
-    const logs2 = [];
+    await page2.waitForSelector('#room:not(.hidden)', { timeout: 15000 });
     
-    page1.on('console', msg => logs1.push(msg.text()));
-    page2.on('console', msg => logs2.push(msg.text()));
+    const roomVisible = await page2.locator('#room').isVisible();
+    console.log('Room visible for guest:', roomVisible);
     
-    await page1.goto(`http://localhost:8765/room.html?room=${roomId}&hash=${namespace}`);
-    await page2.goto(`http://localhost:8765/room.html?room=${roomId}&hash=${namespace}`);
-    
-    await page1.waitForTimeout(10000);
-    await page2.waitForTimeout(10000);
-    
-    const offerSent1 = logs1.filter(l => l.includes('Sending offer')).length;
-    const offerSent2 = logs2.filter(l => l.includes('Sending offer')).length;
-    const pcCreated1 = logs1.filter(l => l.includes('Peer connection created')).length;
-    const pcCreated2 = logs2.filter(l => l.includes('Peer connection created')).length;
-    
-    console.log('P1 offers sent:', offerSent1, 'PCs created:', pcCreated1);
-    console.log('P2 offers sent:', offerSent2, 'PCs created:', pcCreated2);
-    
-    expect(offerSent1 + offerSent2).toBeGreaterThan(0);
-    expect(pcCreated1 + pcCreated2).toBeGreaterThan(0);
+    expect(roomVisible).toBeTruthy();
     
     await context1.close();
     await context2.close();

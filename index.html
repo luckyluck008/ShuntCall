@@ -199,6 +199,10 @@
         
         console.log('Camera access OK');
         
+        // Store password in sessionStorage for when we join our own room
+        sessionStorage.setItem('shuntcall_roomId', roomId);
+        sessionStorage.setItem('shuntcall_password', password);
+        
         // Create share link (no password in URL!)
         const baseUrl = window.location.origin + window.location.pathname.replace(/\/[^\/]*$/, '/');
         const shareLink = `${baseUrl}room.html?room=${encodeURIComponent(roomId)}`;
@@ -207,6 +211,11 @@
         document.getElementById('shareLink').value = shareLink;
         document.getElementById('displayPassword').value = password;
         document.getElementById('shareSection').classList.remove('hidden');
+        
+        // Auto-join the room we just created
+        setTimeout(() => {
+          window.location.href = shareLink;
+        }, 2000);
 
       } catch (error) {
         console.error('=== ROOM ERROR ===');

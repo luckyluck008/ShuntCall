@@ -18,7 +18,7 @@ const Nostr = {
 
   async init() {
     this.keys = this.generateKeys();
-    console.log('Nostr: Keys generated', this.keys.pubkey.slice(0, 16) + '...');
+    console.log('Nostr: Keys generated', this.keys.publicKey.slice(0, 16) + '...');
     
     await this.connectToRelays();
     

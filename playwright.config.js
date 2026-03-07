@@ -18,7 +18,7 @@ export default defineConfig({
   webServer: [
     {
       command: 'npm run relay',
-      port: 8766,
+      port: 8768,
       timeout: 30000,
       reuseExistingServer: true,
     },

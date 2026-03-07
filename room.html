@@ -228,6 +228,16 @@
       },
 
       setupPasswordModal() {
+        // Check if password is in sessionStorage (when creator joins their own room)
+        const storedPassword = sessionStorage.getItem('shuntcall_password');
+        if (storedPassword) {
+          this.password = storedPassword;
+          sessionStorage.removeItem('shuntcall_roomId');
+          sessionStorage.removeItem('shuntcall_password');
+          this.initRoom();
+          return;
+        }
+
         const modal = document.getElementById('passwordModal');
         const input = document.getElementById('roomPassword');
         const submit = document.getElementById('submitPassword');
@@ -268,9 +278,13 @@
           this.signaling = NostrSignaling;
           await this.signaling.init(this.roomId, this.password);
 
+          // Get our pubkey after initialization
+          const ourPubkey = this.signaling.nostr.keys.publicKey;
+          console.log('Our pubkey:', ourPubkey.slice(0, 16) + '...');
+
           // Initialize WebRTC
           this.webrtc = ShuntCallWebRTC;
-          this.webrtc.init(this.localStream, this.signaling.getStatus().pubkey, this.signaling);
+          this.webrtc.init(this.localStream, ourPubkey, this.signaling);
 
           // Setup WebRTC event handlers
           this.webrtc.on('remoteStream', (data) => {
