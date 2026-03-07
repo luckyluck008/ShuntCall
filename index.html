@@ -212,26 +212,48 @@
         document.getElementById('displayPassword').value = password;
         document.getElementById('shareSection').classList.remove('hidden');
         
-        // Auto-join the room we just created
-        setTimeout(() => {
+        // Show "Enter Room" button instead of auto-redirect
+        const enterBtn = document.createElement('button');
+        enterBtn.className = 'btn-full py-primary w-3 rounded-lg font-semibold mt-4';
+        enterBtn.textContent = 'Jetzt beitreten';
+        enterBtn.onclick = () => {
           window.location.href = shareLink;
-        }, 2000);
+        };
+        document.getElementById('shareSection').appendChild(enterBtn);
 
       } catch (error) {
         console.error('=== ROOM ERROR ===');
         console.error('Error:', error);
         
-        let msg = 'Kamera/Mikrofon konnte nicht accessiert werden';
+        // Show share section anyway so user can copy link
+        const baseUrl = window.location.origin + window.location.pathname.replace(/\/[^\/]*$/, '/');
+        const shareLink = `${baseUrl}room.html?room=${encodeURIComponent(roomId)}`;
+        
+        document.getElementById('shareLink').value = shareLink;
+        document.getElementById('displayPassword').value = password;
+        document.getElementById('shareSection').classList.remove('hidden');
+        
+        // Add enter button
+        const enterBtn = document.createElement('button');
+        enterBtn.className = 'btn-primary w-full py-2 rounded-lg font-semibold mt-4';
+        enterBtn.textContent = 'Trotzdem beitreten';
+        enterBtn.onclick = () => {
+          sessionStorage.setItem('shuntcall_roomId', roomId);
+          sessionStorage.setItem('shuntcall_password', password);
+          window.location.href = shareLink;
+        };
+        document.getElementById('shareSection').appendChild(enterBtn);
+        
+        let msg = 'Kamera/Mikrofon Fehler';
         if (error.name === 'NotAllowedError' || error.message?.includes('SECURITY_ERROR')) {
-          msg = 'Zugriff verweigert. Bitte erlaube Kamera/Mikrofon im Browser und nutze HTTPS oder localhost.';
+          msg = 'Zugriff verweigert. ';
         } else if (error.name === 'NotFoundError') {
-          msg = 'Keine Kamera/Mikrofon gefunden. Bitte schließe andere Apps, die die Kamera nutzen.';
+          msg = 'Keine Kamera gefunden. ';
         } else if (error.name === 'NotReadableError') {
-          msg = 'Kamera wird von einer anderen App verwendet.';
+          msg = 'Kamera wird von anderer App verwendet. ';
         }
-        showError(msg + ' (' + error.name + ')');
+        showError(msg + ' Du kannst aber trotzdem beitreten.');
         document.getElementById('loadingSection').classList.add('hidden');
-        document.getElementById('createForm').classList.remove('hidden');
       }
     });
 
