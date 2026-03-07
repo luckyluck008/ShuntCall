@@ -207,7 +207,12 @@ const ShuntCallWebRTC = {
       await this.waitForIceGathering(pc);
       
       console.log('Sending broadcast offer');
-      await this.signaling.broadcastOffer(offer);
+      
+      // Send just the necessary data (avoid RTCSessionDescription object)
+      await this.signaling.broadcastOffer({
+        type: offer.type,
+        sdp: offer.sdp
+      });
       
     } catch (error) {
       console.error('WebRTC: Broadcast offer error', error);
