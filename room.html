@@ -188,6 +188,7 @@
     </div>
   </div>
 
+  <script src="https://unpkg.com/nostr-tools@2.7.2/lib/nostr.bundle.js"></script>
   <script src="js/crypto.js"></script>
   <script src="js/nostr.js"></script>
   <script src="js/nostr-signaling.js"></script>
@@ -286,9 +287,11 @@
           // Initialize media
           await this.initMedia();
 
-          // Initialize Nostr signaling
+           // Initialize Nostr signaling
           this.signaling = NostrSignaling;
+          console.log('Initializing signaling...');
           await this.signaling.init(this.roomId, this.password);
+          console.log('Signaling initialized');
 
           // Get our pubkey after initialization
           const ourPubkey = this.signaling.nostr.keys.publicKey;
@@ -315,7 +318,8 @@
             // WebRTC handles this automatically via setupSignalingListeners
           });
 
-          // Broadcast our offer so existing peers can connect to us
+           // Broadcast our offer so existing peers can connect to us
+          console.log('Broadcasting initial offer...');
           await this.webrtc.broadcastOffer();
 
           this.setupEventListeners();

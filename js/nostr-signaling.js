@@ -13,16 +13,22 @@ const NostrSignaling = {
   pendingOffers: new Map(),
 
   async init(roomId, password) {
-    this.roomTag = await this.computeRoomTag(roomId, password);
-    console.log('NostrSignaling: Room tag:', this.roomTag);
-    
-    this.nostr = Nostr;
-    await this.nostr.init();
-    
-    this.setupSubscriptions();
-    
-    console.log('NostrSignaling: Ready');
-    return this;
+    console.log('NostrSignaling: Initializing with roomId:', roomId);
+    try {
+      this.roomTag = await this.computeRoomTag(roomId, password);
+      console.log('NostrSignaling: Room tag:', this.roomTag);
+      
+      this.nostr = Nostr;
+      await this.nostr.init();
+      
+      this.setupSubscriptions();
+      
+      console.log('NostrSignaling: Ready');
+      return this;
+    } catch (error) {
+      console.error('NostrSignaling: Initialization error', error);
+      throw error;
+    }
   },
 
   async computeRoomTag(roomId, password) {
@@ -35,34 +41,52 @@ const NostrSignaling = {
   },
 
   setupSubscriptions() {
-    // Get events from the last 60 seconds to catch offers published before we subscribed
-    const since = Math.floor(Date.now() / 1000) - 60;
-    
-    const filters = {
-      kinds: [EVENT_KIND],
-      '#t': [this.roomTag],
-      since: since
-    };
+    try {
+      // Get events from the last 60 seconds to catch offers published before we subscribed
+      const since = Math.floor(Date.now() / 1000) - 60;
+      
+      const filters = [
+        {
+          kinds: [EVENT_KIND],
+          '#t': [this.roomTag],
+          since: since
+        }
+      ];
 
-    console.log('NostrSignaling: Subscribing with filters', filters);
-    
-    this.nostr.subscribe('room-' + this.roomTag, filters, (event) => {
-      console.log('NostrSignaling: Received event from', event.pubkey?.slice(0, 16), 'content type:', event.content ? JSON.parse(event.content).type : 'none');
-      this.handleIncomingEvent(event);
-    }, () => {
-      console.log('NostrSignaling: EOSE received');
-    });
+      console.log('NostrSignaling: Subscribing with filters', JSON.stringify(filters));
+      
+      this.nostr.subscribe('room-' + this.roomTag, filters, (event) => {
+        console.log('NostrSignaling: Received event from', event.pubkey?.slice(0, 16), 'content type:', event.content ? JSON.parse(event.content).type : 'none');
+        this.handleIncomingEvent(event);
+      }, () => {
+        console.log('NostrSignaling: EOSE received');
+      });
+    } catch (error) {
+      console.error('NostrSignaling: Subscription setup error', error);
+      throw error;
+    }
   },
 
   handleIncomingEvent(event) {
-    if (!event || !event.content) return;
-    if (event.pubkey === this.nostr.keys.publicKey) return;
-    
-    const eventId = event.id;
-    if (this.sentEvents.has(eventId)) return;
-    this.sentEvents.add(eventId);
-
     try {
+      if (!event || !event.content) {
+        console.warn('NostrSignaling: Invalid event - missing content');
+        return;
+      }
+      
+      if (event.pubkey === this.nostr.keys.publicKey) {
+        console.log('NostrSignaling: Ignoring own event');
+        return;
+      }
+      
+      const eventId = event.id;
+      if (this.sentEvents.has(eventId)) {
+        console.log('NostrSignaling: Ignoring already processed event');
+        return;
+      }
+      
+      this.sentEvents.add(eventId);
+
       const data = JSON.parse(event.content);
       
       if (data.type === 'offer' && data.sdp) {
@@ -79,6 +103,8 @@ const NostrSignaling = {
           sdp: data.sdp,
           eventId: eventId
         });
+      } else {
+        console.log('NostrSignaling: Unknown event type', data.type);
       }
     } catch (e) {
       console.warn('NostrSignaling: Failed to parse event content', e);
@@ -86,55 +112,70 @@ const NostrSignaling = {
   },
 
   async sendOffer(targetPubkey, sdp) {
-    console.log('NostrSignaling: Sending offer to', targetPubkey?.slice(0, 16));
-    const payload = {
-      type: 'offer',
-      sdp: sdp,
-      from: this.nostr.keys.publicKey
-    };
+    try {
+      console.log('NostrSignaling: Sending offer to', targetPubkey?.slice(0, 16));
+      const payload = {
+        type: 'offer',
+        sdp: sdp,
+        from: this.nostr.keys.publicKey
+      };
 
-    const tags = [
-      ['t', this.roomTag],
-      ['p', targetPubkey]
-    ];
+      const tags = [
+        ['t', this.roomTag],
+        ['p', targetPubkey]
+      ];
 
-    await this.nostr.publish(EVENT_KIND, tags, JSON.stringify(payload));
-    console.log('NostrSignaling: Sent offer');
+      const event = await this.nostr.publish(EVENT_KIND, tags, JSON.stringify(payload));
+      console.log('NostrSignaling: Sent offer - event:', event.id.slice(0, 16));
+    } catch (error) {
+      console.error('NostrSignaling: Send offer error', error);
+      throw error;
+    }
   },
 
   async sendAnswer(targetPubkey, sdp, offerEventId) {
-    console.log('NostrSignaling: Sending answer to', targetPubkey?.slice(0, 16));
-    const payload = {
-      type: 'answer',
-      sdp: sdp,
-      from: this.nostr.keys.publicKey,
-      replyTo: offerEventId
-    };
+    try {
+      console.log('NostrSignaling: Sending answer to', targetPubkey?.slice(0, 16));
+      const payload = {
+        type: 'answer',
+        sdp: sdp,
+        from: this.nostr.keys.publicKey,
+        replyTo: offerEventId
+      };
 
-    const tags = [
-      ['t', this.roomTag],
-      ['p', targetPubkey],
-      ['e', offerEventId]
-    ];
+      const tags = [
+        ['t', this.roomTag],
+        ['p', targetPubkey],
+        ['e', offerEventId]
+      ];
 
-    await this.nostr.publish(EVENT_KIND, tags, JSON.stringify(payload));
-    console.log('NostrSignaling: Sent answer');
+      const event = await this.nostr.publish(EVENT_KIND, tags, JSON.stringify(payload));
+      console.log('NostrSignaling: Sent answer - event:', event.id.slice(0, 16));
+    } catch (error) {
+      console.error('NostrSignaling: Send answer error', error);
+      throw error;
+    }
   },
 
   async broadcastOffer(sdp) {
-    console.log('NostrSignaling: Broadcasting offer to room');
-    const payload = {
-      type: 'offer',
-      sdp: sdp,
-      from: this.nostr.keys.publicKey
-    };
+    try {
+      console.log('NostrSignaling: Broadcasting offer to room');
+      const payload = {
+        type: 'offer',
+        sdp: sdp,
+        from: this.nostr.keys.publicKey
+      };
 
-    const tags = [
-      ['t', this.roomTag]
-    ];
+      const tags = [
+        ['t', this.roomTag]
+      ];
 
-    await this.nostr.publish(EVENT_KIND, tags, JSON.stringify(payload));
-    console.log('NostrSignaling: Broadcast offer sent');
+      const event = await this.nostr.publish(EVENT_KIND, tags, JSON.stringify(payload));
+      console.log('NostrSignaling: Broadcast offer sent - event:', event.id.slice(0, 16));
+    } catch (error) {
+      console.error('NostrSignaling: Broadcast offer error', error);
+      throw error;
+    }
   },
 
   on(event, callback) {

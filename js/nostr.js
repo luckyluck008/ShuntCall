@@ -19,31 +19,33 @@ const Nostr = {
   listeners: {},
 
   async init() {
-    this.keys = this.generateKeys();
-    console.log('Nostr: Keys generated', this.keys.publicKey.slice(0, 16) + '...');
-    
-    await this.connectToRelays();
-    
-    return this.keys;
+    console.log('Nostr: Initializing');
+    try {
+      this.keys = this.generateKeys();
+      console.log('Nostr: Keys generated', this.keys.publicKey.slice(0, 16) + '...');
+      
+      const connected = await this.connectToRelays();
+      if (!connected) {
+        console.error('Nostr: No relays connected');
+        throw new Error('Failed to connect to any Nostr relay');
+      }
+      
+      return this.keys;
+    } catch (error) {
+      console.error('Nostr: Initialization error', error);
+      throw error;
+    }
   },
 
   generateKeys() {
-    const privateKey = this.generatePrivateKey();
-    const publicKey = this.getPublicKey(privateKey);
-    return { privateKey, publicKey };
-  },
-
-  generatePrivateKey() {
-    const bytes = new Uint8Array(32);
-    crypto.getRandomValues(bytes);
-    return this.bytesToHex(bytes);
-  },
-
-  getPublicKey(privateKey) {
     try {
-      return nostrCrypto.getPublicKey(privateKey);
-    } catch (e) {
-      return this.derivePublicKey(privateKey);
+      const privateKey = window.NostrTools.generateSecretKey();
+      const publicKey = window.NostrTools.getPublicKey(privateKey);
+      console.log('Nostr: Generated keys - pubkey:', publicKey.slice(0, 16));
+      return { privateKey, publicKey };
+    } catch (error) {
+      console.error('Nostr: Error generating keys', error);
+      throw error;
     }
   },
 
@@ -59,27 +61,6 @@ const Nostr = {
     return bytes;
   },
 
-  derivePublicKey(privateKeyHex) {
-    try {
-      const privateKeyBytes = this.hexToBytes(privateKeyHex);
-      const publicKeyBytes = new Uint8Array(32);
-      for (let i = 0; i < 32; i++) {
-        publicKeyBytes[i] = privateKeyBytes[i] ^ 0x50;
-      }
-      return this.bytesToHex(publicKeyBytes);
-    } catch (e) {
-      return this.simplePublicDerivation(privateKeyHex);
-    }
-  },
-
-  simplePublicDerivation(privateKey) {
-    let hash = privateKey;
-    for (let i = 0; i < 10000; i++) {
-      hash = this.sha256(hash);
-    }
-    return hash.slice(0, 64);
-  },
-
   async sha256(message) {
     const msgBuffer = new TextEncoder().encode(message);
     const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
@@ -87,13 +68,21 @@ const Nostr = {
   },
 
   async connectToRelays() {
-    const connectPromises = NostrRelays.map(relayUrl => this.connectToRelay(relayUrl));
-    await Promise.all(connectPromises);
-    
-    const connectedCount = Object.keys(this.relays).filter(url => this.relays[url]?.readyState === 1).length;
-    console.log(`Nostr: Connected to ${connectedCount}/${NostrRelays.length} relays`);
-    
-    return connectedCount > 0;
+    try {
+      const connectPromises = NostrRelays.map(relayUrl => this.connectToRelay(relayUrl));
+      const results = await Promise.all(connectPromises);
+      
+      const connectedCount = results.filter(Boolean).length;
+      const readyCount = Object.keys(this.relays).filter(url => this.relays[url]?.readyState === 1).length;
+      
+      console.log(`Nostr: Connection attempts - success: ${connectedCount}/${NostrRelays.length}`);
+      console.log(`Nostr: Ready state - open: ${readyCount}/${NostrRelays.length}`);
+      
+      return readyCount > 0;
+    } catch (error) {
+      console.error('Nostr: Relay connection error', error);
+      return false;
+    }
   },
 
   async connectToRelay(url) {
@@ -111,9 +100,10 @@ const Nostr = {
         ws.onmessage = (event) => {
           try {
             const msg = JSON.parse(event.data);
+            console.log('Nostr: Received from', url, msg);
             this.handleMessage(msg);
           } catch (e) {
-            console.warn('Nostr: Failed to parse message', e);
+            console.warn('Nostr: Failed to parse message from', url, e);
           }
         };
         
@@ -131,6 +121,7 @@ const Nostr = {
         
         setTimeout(() => {
           if (ws.readyState !== 1) {
+            console.warn('Nostr: Connection timeout to', url);
             resolve(false);
           }
         }, 5000);
@@ -143,120 +134,146 @@ const Nostr = {
   },
 
   handleMessage(msg) {
-    if (!msg || !Array.isArray(msg)) return;
-    
-    const [type, ...rest] = msg;
-    
-    if (type === 'EVENT') {
-      const subId = rest[0];
-      const data = rest[1];
-      console.log('Nostr: Got EVENT for sub', subId, 'kind:', data?.kind);
-      const subscription = this.subscriptions[subId];
-      if (subscription) {
-        subscription.callback(data);
+    try {
+      if (!msg || !Array.isArray(msg)) {
+        console.warn('Nostr: Invalid message format', msg);
+        return;
       }
-    } else if (type === 'EOSE') {
-      const subId = rest[0];
-      console.log('Nostr: Got EOSE for sub', subId);
-      const subscription = this.subscriptions[subId];
-      if (subscription) {
-        subscription.eose = true;
-        if (subscription.onEose) {
-          subscription.onEose();
+      
+      const [type, ...rest] = msg;
+      
+      if (type === 'EVENT') {
+        const subId = rest[0];
+        const data = rest[1];
+        console.log('Nostr: Got EVENT for sub', subId, 'kind:', data?.kind);
+        const subscription = this.subscriptions[subId];
+        if (subscription) {
+          subscription.callback(data);
+        } else {
+          console.warn('Nostr: No subscription for subId', subId);
         }
+      } else if (type === 'EOSE') {
+        const subId = rest[0];
+        console.log('Nostr: Got EOSE for sub', subId);
+        const subscription = this.subscriptions[subId];
+        if (subscription) {
+          subscription.eose = true;
+          if (subscription.onEose) {
+            subscription.onEose();
+          }
+          // Clear timer
+          if (subscription.eoseTimer) {
+            clearTimeout(subscription.eoseTimer);
+            subscription.eoseTimer = null;
+          }
+        } else {
+          console.warn('Nostr: No subscription for EOSE subId', subId);
+        }
+      } else if (type === 'OK') {
+        const eventId = rest[0];
+        const success = rest[1];
+        const message = rest[2];
+        console.log('Nostr: OK message - event:', eventId?.slice(0, 16), 'success:', success, 'message:', message);
+      } else if (type === 'NOTICE') {
+        console.log('Nostr: NOTICE:', rest);
+      } else {
+        console.log('Nostr: Unknown message type:', type, rest);
       }
-    } else if (type === 'OK') {
-      console.log('Nostr: OK message:', rest);
-    } else if (type === 'NOTICE') {
-      console.log('Nostr: NOTICE:', rest);
+    } catch (error) {
+      console.error('Nostr: Message handling error', error);
     }
   },
 
   subscribe(subId, filters, callback, onEose = null) {
-    console.log('Nostr: Creating subscription', subId, 'with filters', JSON.stringify(filters));
-    this.subscriptions[subId] = { filters, callback, onEose, eose: false };
-    
-    const msg = ['REQ', subId, filters];
-    this.send(msg);
-    
-    return () => this.unsubscribe(subId);
-  },
-
-  unsubscribe(subId) {
-    delete this.subscriptions[subId];
-    this.send(['CLOSE', subId]);
-  },
-
-  async publish(kind, tags, content) {
-    const createdAt = Math.floor(Date.now() / 1000);
-    
-    const event = {
-      kind,
-      created_at: createdAt,
-      tags,
-      content,
-      pubkey: this.keys.publicKey
-    };
-    
-    event.id = await this.getEventHash(event);
-    event.sig = await this.signEvent(event, this.keys.privateKey);
-    
-    const msg = ['EVENT', event];
-    this.send(msg);
-    
-    console.log('Nostr: Published event', event.id.slice(0, 16) + '...');
-    
-    return event;
-  },
-
-  async getEventHash(event) {
-    const serialized = JSON.stringify([
-      0,
-      event.pubkey,
-      event.created_at,
-      event.kind,
-      event.tags,
-      event.content
-    ]);
-    
-    const hashBuffer = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(serialized));
-    return this.bytesToHex(new Uint8Array(hashBuffer));
-  },
-
-  async signEvent(event, privateKey) {
-    const hash = event.id;
-    return this.schnorrSign(hash, privateKey);
-  },
-
-  async schnorrSign(message, privateKey) {
     try {
-      const msgHash = await this.sha256(message);
-      const privateKeyBytes = this.hexToBytes(privateKey);
-      const msgBytes = this.hexToBytes(msgHash);
+      console.log('Nostr: Creating subscription', subId, 'with filters', JSON.stringify(filters));
+      this.subscriptions[subId] = { filters, callback, onEose, eose: false };
       
-      const combined = new Uint8Array(32 + 32);
-      combined.set(privateKeyBytes.slice(0, 32));
-      combined.set(msgBytes, 32);
+      // Ensure filters is an array for valid Nostr protocol
+      const filtersArray = Array.isArray(filters) ? filters : [filters];
+      const msg = ['REQ', subId, ...filtersArray];
+      console.log('Nostr: Sending subscription request:', msg);
       
-      const random = new Uint8Array(32);
-      crypto.getRandomValues(random);
+      // Add a timer to check if we received EOSE
+      const eoseTimer = setTimeout(() => {
+        if (!this.subscriptions[subId]?.eose) {
+          console.warn('Nostr: No EOSE received for sub', subId, 'within 10 seconds');
+        }
+      }, 10000);
       
-      const testSig = this.bytesToHex(random.slice(0, 64));
-      return testSig;
-    } catch (e) {
-      const fallback = await this.sha256(message + privateKey);
-      return fallback + fallback.slice(0, 64);
+      this.subscriptions[subId].eoseTimer = eoseTimer;
+      
+      this.send(msg);
+      
+      return () => this.unsubscribe(subId);
+    } catch (error) {
+      console.error('Nostr: Subscribe error', error);
+      throw error;
     }
   },
 
-  send(msg) {
-    const data = JSON.stringify(msg);
-    
-    Object.values(this.relays).forEach(ws => {
-      if (ws && ws.readyState === 1) {
-        ws.send(data);
+  unsubscribe(subId) {
+    try {
+      if (this.subscriptions[subId]?.eoseTimer) {
+        clearTimeout(this.subscriptions[subId].eoseTimer);
       }
-    });
+      delete this.subscriptions[subId];
+      this.send(['CLOSE', subId]);
+      console.log('Nostr: Unsubscribed from', subId);
+    } catch (error) {
+      console.error('Nostr: Unsubscribe error', error);
+    }
+  },
+
+  async publish(kind, tags, content) {
+    try {
+      const createdAt = Math.floor(Date.now() / 1000);
+      
+      const event = {
+        kind,
+        created_at: createdAt,
+        tags,
+        content,
+        pubkey: this.keys.publicKey
+      };
+      
+      event.id = window.NostrTools.getEventHash(event);
+      event.sig = window.NostrTools.finalizeEvent(event, this.keys.privateKey);
+      
+      const msg = ['EVENT', event];
+      this.send(msg);
+      
+      console.log('Nostr: Published event', event.id.slice(0, 16) + '...');
+      
+      return event;
+    } catch (error) {
+      console.error('Nostr: Publish error', error);
+      throw error;
+    }
+  },
+
+
+
+  send(msg) {
+    try {
+      const data = JSON.stringify(msg);
+      
+      Object.keys(this.relays).forEach(url => {
+        const ws = this.relays[url];
+        if (ws && ws.readyState === 1) {
+          console.log('Nostr: Sending to relay', url, msg[0]);
+          try {
+            ws.send(data);
+          } catch (error) {
+            console.error('Nostr: Error sending to relay', url, error);
+          }
+        } else {
+          console.warn('Nostr: Relay not connected or ready', url, ws?.readyState);
+        }
+      });
+    } catch (error) {
+      console.error('Nostr: Send error', error);
+    }
   },
 
   on(event, callback) {
@@ -278,10 +295,12 @@ const Nostr = {
 
   getStatus() {
     const connected = Object.keys(this.relays).filter(url => this.relays[url]?.readyState === 1).length;
+    const subscriptions = Object.keys(this.subscriptions).length;
     return {
       connected,
       total: NostrRelays.length,
-      pubkey: this.keys?.publicKey
+      pubkey: this.keys?.publicKey,
+      subscriptions
     };
   }
 };
