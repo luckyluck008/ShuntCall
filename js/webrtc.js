@@ -26,6 +26,8 @@ const ShuntCallWebRTC = {
     this.signaling = signaling;
     this.pendingIceCandidates = {};
     
+    console.log('WebRTC init - stream:', !!localStream, 'peerId:', peerId.slice(0, 16));
+    
     this.setupSignalingListeners();
     console.log('ShuntCallWebRTC initialized');
     return this;
@@ -178,18 +180,35 @@ const ShuntCallWebRTC = {
     
     console.log('Sending offer to:', remotePeerId.slice(0, 16) + '...');
     await this.signaling.sendOffer(remotePeerId, offer);
+    
+    return offer;
   },
 
   async broadcastOffer() {
     try {
-      if (!this.peerConnection || !this.localStream) {
-        console.log('WebRTC: Cannot broadcast offer - peerConnection or localStream not ready');
+      if (!this.localStream) {
+        console.log('WebRTC: Cannot broadcast offer - localStream not ready');
         return;
       }
       
       console.log('WebRTC: Creating offer for broadcast');
-      const offer = await this.createOffer();
-      await this.signaling.broadcastOffer(offer.sdp);
+      
+      // Create a dummy peer connection for broadcast
+      // Note: For broadcast, we just need to generate the offer without a specific peer
+      const dummyPeerId = 'broadcast';
+      let pc = this.peerConnections[dummyPeerId];
+      if (!pc) {
+        pc = this.createPeerConnection(dummyPeerId);
+      }
+      
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      
+      await this.waitForIceGathering(pc);
+      
+      console.log('Sending broadcast offer');
+      await this.signaling.broadcastOffer(offer);
+      
     } catch (error) {
       console.error('WebRTC: Broadcast offer error', error);
       throw error;

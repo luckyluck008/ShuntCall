@@ -111,12 +111,12 @@ const NostrSignaling = {
     }
   },
 
-  async sendOffer(targetPubkey, sdp) {
+  async sendOffer(targetPubkey, offer) {
     try {
       console.log('NostrSignaling: Sending offer to', targetPubkey?.slice(0, 16));
       const payload = {
         type: 'offer',
-        sdp: sdp,
+        sdp: offer.sdp,
         from: this.nostr.keys.publicKey
       };
 
@@ -133,12 +133,12 @@ const NostrSignaling = {
     }
   },
 
-  async sendAnswer(targetPubkey, sdp, offerEventId) {
+  async sendAnswer(targetPubkey, answer, offerEventId) {
     try {
       console.log('NostrSignaling: Sending answer to', targetPubkey?.slice(0, 16));
       const payload = {
         type: 'answer',
-        sdp: sdp,
+        sdp: answer.sdp,
         from: this.nostr.keys.publicKey,
         replyTo: offerEventId
       };
