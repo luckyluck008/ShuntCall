@@ -4,7 +4,7 @@
  */
 
 const GUN_PEERS = [
-  'http://localhost:8766/gun',
+  'http://localhost:8768/gun',
   'https://gun-manhattan.herokuapp.com/gun',
   'https://gun-eu.herokuapp.com/gun'
 ];
@@ -33,6 +33,7 @@ const ShuntCallSignaling = {
     
     this.pollForPeers();
     this.setupListeners();
+    this.pollForMessages();
     
     setInterval(() => {
       this.myNode.put({ id: this.peerId, time: Date.now() });
@@ -56,10 +57,57 @@ const ShuntCallSignaling = {
     }, 2000);
   },
   
+  pollForMessages() {
+    const checkOffer = () => {
+      this.signaling.get(this.peerId).get('offer').once((data, key) => {
+        if (!data || !data.from || !data.sdp || !data.time) return;
+        if (data.time < Date.now() - 30000) return;
+        
+        if (!this.sentMessages.has(`offer-${data.from}`) || this.sentMessages.get(`offer-${data.from}`) < data.time) {
+          console.log('Polled offer from:', data.from);
+          this.sentMessages.set(`offer-${data.from}`, data.time);
+          this.emit('offer', { from: data.from, sdp: data.sdp });
+        }
+      });
+    };
+    
+    const checkAnswer = () => {
+      this.signaling.get(this.peerId).get('answer').once((data, key) => {
+        if (!data || !data.from || !data.sdp || !data.time) return;
+        if (data.time < Date.now() - 30000) return;
+        
+        if (!this.sentMessages.has(`answer-${data.from}`) || this.sentMessages.get(`answer-${data.from}`) < data.time) {
+          console.log('Polled answer from:', data.from);
+          this.sentMessages.set(`answer-${data.from}`, data.time);
+          this.emit('answer', { from: data.from, sdp: data.sdp });
+        }
+      });
+    };
+    
+    const checkIce = () => {
+      this.signaling.get(this.peerId).get('ice').once((data, key) => {
+        if (!data || !data.from || !data.candidate || !data.time) return;
+        if (data.time < Date.now() - 30000) return;
+        
+        const keyId = `ice-${data.from}-${data.time}`;
+        if (!this.sentMessages.has(keyId)) {
+          console.log('Polled ICE from:', data.from);
+          this.sentMessages.set(keyId, data.time);
+          this.emit('ice', { from: data.from, candidate: data.candidate });
+        }
+      });
+    };
+    
+    setInterval(() => {
+      checkOffer();
+      checkAnswer();
+      checkIce();
+    }, 1000);
+  },
+  
   setupListeners() {
-    const offerNode = this.signaling.get(this.peerId).get('offer');
-    offerNode.map().on((data, key) => {
-      if (data && data.from && data.sdp && data.time > Date.now() - 10000) {
+    this.signaling.get(this.peerId).get('offer').on((data) => {
+      if (data && data.from && data.sdp && data.time > Date.now() - 30000) {
         if (!this.sentMessages.has(`offer-${data.from}`) || this.sentMessages.get(`offer-${data.from}`) < data.time) {
           console.log('Got offer from:', data.from);
           this.sentMessages.set(`offer-${data.from}`, data.time);
@@ -68,9 +116,8 @@ const ShuntCallSignaling = {
       }
     });
     
-    const answerNode = this.signaling.get(this.peerId).get('answer');
-    answerNode.map().on((data, key) => {
-      if (data && data.from && data.sdp && data.time > Date.now() - 10000) {
+    this.signaling.get(this.peerId).get('answer').on((data) => {
+      if (data && data.from && data.sdp && data.time > Date.now() - 30000) {
         if (!this.sentMessages.has(`answer-${data.from}`) || this.sentMessages.get(`answer-${data.from}`) < data.time) {
           console.log('Got answer from:', data.from);
           this.sentMessages.set(`answer-${data.from}`, data.time);
@@ -79,9 +126,8 @@ const ShuntCallSignaling = {
       }
     });
     
-    const iceNode = this.signaling.get(this.peerId).get('ice');
-    iceNode.map().on((data, key) => {
-      if (data && data.from && data.candidate && data.time > Date.now() - 5000) {
+    this.signaling.get(this.peerId).get('ice').on((data) => {
+      if (data && data.from && data.candidate && data.time > Date.now() - 30000) {
         this.emit('ice', { from: data.from, candidate: data.candidate });
       }
     });
@@ -93,7 +139,7 @@ const ShuntCallSignaling = {
     
     for (let i = 0; i < 3; i++) {
       setTimeout(() => {
-        this.signaling.get(targetId).get('offer').set(msg);
+        this.signaling.get(targetId).get('offer').put(msg);
       }, i * 500);
     }
   },
@@ -104,7 +150,7 @@ const ShuntCallSignaling = {
     
     for (let i = 0; i < 3; i++) {
       setTimeout(() => {
-        this.signaling.get(targetId).get('answer').set(msg);
+        this.signaling.get(targetId).get('answer').put(msg);
       }, i * 500);
     }
   },
@@ -112,7 +158,7 @@ const ShuntCallSignaling = {
   sendIceCandidate(targetId, candidate) {
     const msg = { from: this.peerId, candidate: JSON.stringify(candidate), time: Date.now() };
     
-    this.signaling.get(targetId).get('ice').set(msg);
+    this.signaling.get(targetId).get('ice').put(msg);
   },
   
   async getPeers() {
