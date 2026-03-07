@@ -28,35 +28,31 @@ const ManualP2P = {
       this.peerConnection.addTrack(track, localStream);
     });
     
+    // Set up ICE candidate handler
     const iceCandidates = [];
-    
     this.peerConnection.onicecandidate = (event) => {
       if (event.candidate) {
         iceCandidates.push(event.candidate.toJSON());
       }
     };
     
+    // Create offer (not answer - we're the offerer)
     const offer = await this.peerConnection.createOffer();
     await this.peerConnection.setLocalDescription(offer);
     
+    // Wait for ICE gathering to complete
     await this.waitForIceGathering();
     
-    const answer = await this.peerConnection.createAnswer();
-    await this.peerConnection.setLocalDescription(answer);
-    
-    await this.waitForIceGathering();
-    
+    // Return just the offer - joiner will create the answer
     const roomData = {
       peerId: this.peerId,
       offer: {
         type: offer.type,
         sdp: offer.sdp
-      },
-      answer: {
-        type: answer.type,
-        sdp: answer.sdp
       }
     };
+    
+    console.log('Room created - offer generated');
     
     return {
       peerId: this.peerId,
@@ -74,6 +70,12 @@ const ManualP2P = {
       throw new Error('Invalid room link');
     }
     
+    if (!roomData.offer) {
+      throw new Error('No offer in room data');
+    }
+    
+    console.log('Joining room, setting remote offer...');
+    
     this.peerId = roomData.peerId;
     
     this.peerConnection = new RTCPeerConnection({
@@ -86,22 +88,27 @@ const ManualP2P = {
     });
     
     this.peerConnection.ontrack = (event) => {
+      console.log('Remote track received');
       if (this.onRemoteStream) {
         this.onRemoteStream(event.streams[0]);
       }
     };
     
     this.peerConnection.onconnectionstatechange = () => {
+      console.log('Connection state:', this.peerConnection.connectionState);
       if (this.onConnectionStateChange) {
         this.onConnectionStateChange(this.peerConnection.connectionState);
       }
     };
     
+    // Set the remote offer from host
     await this.peerConnection.setRemoteDescription(new RTCSessionDescription(roomData.offer));
-    await this.peerConnection.setRemoteDescription(new RTCSessionDescription(roomData.answer));
     
+    // Create and set answer (we're the answerer)
     const answer = await this.peerConnection.createAnswer();
     await this.peerConnection.setLocalDescription(answer);
+    
+    console.log('Answer created and set locally');
     
     return this.peerId;
   },
