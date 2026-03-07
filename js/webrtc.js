@@ -33,7 +33,7 @@ const ShuntCallWebRTC = {
     return this;
   },
 
-  setupSignalingListeners() {
+   setupSignalingListeners() {
     this.signaling.on('offer', async (data) => {
       console.log('Received offer event from:', data.from.slice(0, 16) + '...');
       await this.handleOffer(data.from, JSON.parse(data.sdp), data.eventId);
@@ -43,9 +43,14 @@ const ShuntCallWebRTC = {
       console.log('Received answer event from:', data.from.slice(0, 16) + '...');
       await this.handleAnswer(data.from, JSON.parse(data.sdp));
     });
+    
+    this.signaling.on('iceCandidate', async (data) => {
+      console.log('Received ICE candidate from:', data.from.slice(0, 16) + '...');
+      await this.handleIceCandidate(data.from, data.candidate);
+    });
   },
 
-  createPeerConnection(remotePeerId) {
+   createPeerConnection(remotePeerId) {
     const pc = new RTCPeerConnection(this.config);
     
     pc.peerId = remotePeerId;
@@ -61,6 +66,18 @@ const ShuntCallWebRTC = {
     }
 
     pc.onicecandidate = (event) => {
+      if (event.candidate) {
+        console.log('ICE candidate generated for peer:', remotePeerId.slice(0, 16));
+        this.emit('iceCandidate', {
+          peerId: remotePeerId,
+          candidate: event.candidate
+        });
+        
+        // If signaling has ice candidate method, send it
+        if (this.signaling && this.signaling.sendIceCandidate) {
+          this.signaling.sendIceCandidate(remotePeerId, event.candidate);
+        }
+      }
     };
     
     pc.ontrack = (event) => {
@@ -119,6 +136,27 @@ const ShuntCallWebRTC = {
     console.log('Remote description set for answer');
     
     this.processPendingIceCandidates(fromPeerId);
+  },
+
+   async handleIceCandidate(peerId, candidate) {
+    let pc = this.peerConnections[peerId];
+    if (!pc) {
+      console.log('No peer connection for ICE candidate - buffering:', peerId.slice(0, 16));
+      this.pendingIceCandidates[peerId] = this.pendingIceCandidates[peerId] || [];
+      this.pendingIceCandidates[peerId].push(candidate);
+      return;
+    }
+
+    try {
+      if (pc.remoteDescription) {
+        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+      } else {
+        console.log('Remote description not set - buffering ICE candidate:', peerId.slice(0, 16));
+        this.pendingIceCandidates[peerId].push(candidate);
+      }
+    } catch (error) {
+      console.error('Error adding ICE candidate:', error);
+    }
   },
 
   processPendingIceCandidates(peerId) {

@@ -89,7 +89,7 @@ const NostrSignaling = {
 
       const data = JSON.parse(event.content);
       
-      if (data.type === 'offer' && data.sdp) {
+       if (data.type === 'offer' && data.sdp) {
         console.log('NostrSignaling: Received offer from', event.pubkey.slice(0, 16) + '...');
         this.emit('offer', {
           from: event.pubkey,
@@ -101,6 +101,13 @@ const NostrSignaling = {
         this.emit('answer', {
           from: event.pubkey,
           sdp: data.sdp,
+          eventId: eventId
+        });
+      } else if (data.type === 'ice' && data.candidate) {
+        console.log('NostrSignaling: Received ICE candidate from', event.pubkey.slice(0, 16) + '...');
+        this.emit('iceCandidate', {
+          from: event.pubkey,
+          candidate: data.candidate,
           eventId: eventId
         });
       } else {
@@ -157,7 +164,7 @@ const NostrSignaling = {
     }
   },
 
-  async broadcastOffer(sdp) {
+   async broadcastOffer(sdp) {
     try {
       console.log('NostrSignaling: Broadcasting offer to room');
       const payload = {
@@ -174,6 +181,28 @@ const NostrSignaling = {
       console.log('NostrSignaling: Broadcast offer sent - event:', event.id.slice(0, 16));
     } catch (error) {
       console.error('NostrSignaling: Broadcast offer error', error);
+      throw error;
+    }
+  },
+
+  async sendIceCandidate(targetPubkey, candidate) {
+    try {
+      console.log('NostrSignaling: Sending ICE candidate to', targetPubkey?.slice(0, 16));
+      const payload = {
+        type: 'ice',
+        candidate: candidate,
+        from: this.nostr.keys.publicKey
+      };
+
+      const tags = [
+        ['t', this.roomTag],
+        ['p', targetPubkey]
+      ];
+
+      const event = await this.nostr.publish(EVENT_KIND, tags, JSON.stringify(payload));
+      console.log('NostrSignaling: Sent ICE candidate - event:', event.id.slice(0, 16));
+    } catch (error) {
+      console.error('NostrSignaling: Send ICE candidate error', error);
       throw error;
     }
   },

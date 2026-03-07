@@ -5,10 +5,10 @@
 
 const NostrRelays = [
   'wss://nos.lol',
-  'wss://relay.damus.io',
-  'wss://relay.nostr.band',
-  'wss://brb.io',
-  'wss://njump.me'
+  'wss://njump.me',
+  'wss://relay.primal.net',
+  'wss://relay.snort.social',
+  'wss://nostr.wine'
 ];
 
 const Nostr = {
