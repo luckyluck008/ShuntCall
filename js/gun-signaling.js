@@ -4,6 +4,7 @@
  */
 
 const GUN_PEERS = [
+  'http://localhost:8766/gun',
   'https://gun-manhattan.herokuapp.com/gun',
   'https://gun-eu.herokuapp.com/gun'
 ];

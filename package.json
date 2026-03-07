@@ -1,0 +1,17 @@
+{
+  "name": "shuntcall-tests",
+  "version": "1.0.0",
+  "description": "P2P video conferencing tests",
+  "scripts": {
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "relay": "node gun-relay.js"
+  },
+  "devDependencies": {
+    "@gun-vue/relay": "^0.6.1",
+    "@playwright/test": "^1.40.0",
+    "gun": "^0.2020.1241",
+    "http-server": "^14.1.1"
+  },
+  "type": "module"
+}
