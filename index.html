@@ -6,7 +6,9 @@
   <title>ShuntCall - P2P Video Chat</title>
   <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
   <script src="js/crypto.js"></script>
-  <script src="js/manual-p2p.js"></script>
+  <script src="js/nostr.js"></script>
+  <script src="js/nostr-signaling.js"></script>
+  <script src="js/webrtc.js"></script>
   <style>
     body { font-family: system-ui, -apple-system, sans-serif; }
     .gradient-bg { background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%); }
@@ -100,11 +102,22 @@
     <!-- Share Link Section -->
     <div id="shareSection" class="card rounded-2xl p-6 mt-8 w-full max-w-2xl hidden">
       <h3 class="text-lg font-semibold mb-3">Einladungslink (teilen mit anderen)</h3>
-      <div class="flex gap-2">
+      <div class="flex gap-2 mb-4">
         <input type="text" id="shareLink" class="input-field flex-1 px-4 py-3 rounded-lg text-sm" readonly>
         <button type="button" id="copyLink" class="btn-primary px-6 py-2 rounded-lg font-medium">
           Kopieren
         </button>
+      </div>
+      
+      <div class="bg-yellow-500/20 border border-yellow-500/50 rounded-lg p-4">
+        <p class="text-yellow-300 font-semibold mb-2">⚠️ WICHTIG: Teile das Passwort SEPARAT!</p>
+        <p class="text-yellow-200 text-sm">Das Passwort wird nicht im Link übertragen. Teile es auf einem anderen Weg (Telefon, SMS, etc.).</p>
+        <div class="mt-3 flex gap-2">
+          <input type="text" id="displayPassword" class="input-field flex-1 px-4 py-2 rounded-lg text-sm" readonly>
+          <button type="button" id="copyPassword" class="btn-secondary px-4 py-2 rounded-lg text-sm">
+            Kopieren
+          </button>
+        </div>
       </div>
     </div>
 
@@ -162,55 +175,42 @@
         return;
       }
 
-      const encoder = new TextEncoder();
-      const data = encoder.encode(roomId + ':' + password);
-      const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-      const hashArray = Array.from(new Uint8Array(hashBuffer));
-      const hash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-
       document.getElementById('createForm').classList.add('hidden');
       document.getElementById('loadingSection').classList.remove('hidden');
 
       try {
-        // Check HTTPS/Localhost requirement first
         const isSecure = window.location.protocol === 'https:' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
         
         if (!isSecure) {
-          throw new Error('SECURITY_ERROR: getUserMedia requires HTTPS or localhost. Current: ' + window.location.protocol + '//' + window.location.hostname);
+          throw new Error('SECURITY_ERROR: getUserMedia requires HTTPS or localhost');
         }
         
-        console.log('=== MEDIA DEBUG ===');
-        console.log('Protocol:', window.location.protocol);
-        console.log('Hostname:', window.location.hostname);
+        console.log('=== ROOM CREATION ===');
+        console.log('Room ID:', roomId);
         
-        // First enumerate devices
-        const devices = await navigator.mediaDevices.enumerateDevices();
-        const videoDevices = devices.filter(d => d.kind === 'videoinput');
-        const audioDevices = devices.filter(d => d.kind === 'audioinput');
-        
-        console.log('Devices found:', { video: videoDevices.length, audio: audioDevices.length });
-        console.log('==================');
-        
+        // Test camera access (just to verify it works)
         const localStream = await navigator.mediaDevices.getUserMedia({
           video: true,
           audio: true
         });
-
-        const p2pData = await ManualP2P.createRoom(localStream);
         
+        // Stop the stream - room.html will request it again
         localStream.getTracks().forEach(track => track.stop());
-
+        
+        console.log('Camera access OK');
+        
+        // Create share link (no password in URL!)
         const baseUrl = window.location.origin + window.location.pathname.replace(/\/[^\/]*$/, '/');
-        const shareLink = `${baseUrl}room.html?room=${encodeURIComponent(roomId)}&hash=${hash}&data=${p2pData.roomData}`;
+        const shareLink = `${baseUrl}room.html?room=${encodeURIComponent(roomId)}`;
 
         document.getElementById('loadingSection').classList.add('hidden');
         document.getElementById('shareLink').value = shareLink;
+        document.getElementById('displayPassword').value = password;
         document.getElementById('shareSection').classList.remove('hidden');
 
       } catch (error) {
         console.error('=== ROOM ERROR ===');
         console.error('Error:', error);
-        console.error('==================');
         
         let msg = 'Kamera/Mikrofon konnte nicht accessiert werden';
         if (error.name === 'NotAllowedError' || error.message?.includes('SECURITY_ERROR')) {
@@ -219,10 +219,6 @@
           msg = 'Keine Kamera/Mikrofon gefunden. Bitte schließe andere Apps, die die Kamera nutzen.';
         } else if (error.name === 'NotReadableError') {
           msg = 'Kamera wird von einer anderen App verwendet.';
-        } else if (error.name === 'OverconstrainedError') {
-          msg = 'Die angeforderten Medienkonfiguration wird nicht unterstützt.';
-        } else if (error.name === 'AbortError') {
-          msg = 'Verbindung zur Kamera wurde abgebrochen.';
         }
         showError(msg + ' (' + error.name + ')');
         document.getElementById('loadingSection').classList.add('hidden');
@@ -248,6 +244,16 @@
       navigator.clipboard.writeText(linkInput.value);
       
       const btn = document.getElementById('copyLink');
+      btn.textContent = 'Kopiert!';
+      setTimeout(() => btn.textContent = 'Kopieren', 2000);
+    });
+
+    document.getElementById('copyPassword').addEventListener('click', () => {
+      const pwInput = document.getElementById('displayPassword');
+      pwInput.select();
+      navigator.clipboard.writeText(pwInput.value);
+      
+      const btn = document.getElementById('copyPassword');
       btn.textContent = 'Kopiert!';
       setTimeout(() => btn.textContent = 'Kopieren', 2000);
     });

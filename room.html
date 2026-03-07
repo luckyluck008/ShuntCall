@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ShuntCall - Raum</title>
   <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
-  <script src="https://cdn.jsdelivr.net/npm/gun/gun.js"></script>
   <style>
     body { font-family: system-ui, -apple-system, sans-serif; }
     .video-grid { 
@@ -84,12 +83,38 @@
     .toolbar-btn.active { background: #6366f1; }
     .toolbar-btn.danger { background: #ef4444; }
     .toolbar-btn.danger:hover { background: #dc2626; }
+    .password-modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.9);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 200;
+    }
+    .password-modal input {
+      background: rgba(255,255,255,0.1);
+      border: 1px solid rgba(255,255,255,0.3);
+    }
   </style>
 </head>
 <body class="bg-gray-900 text-white">
   
+  <!-- Password Modal -->
+  <div id="passwordModal" class="password-modal">
+    <div class="bg-gray-800 p-8 rounded-2xl max-w-md w-full">
+      <h2 class="text-2xl font-bold mb-4">Raum beitreten</h2>
+      <p class="text-gray-400 mb-6">Gib das Passwort ein, um dem Raum beizutreten.</p>
+      <input type="password" id="roomPassword" class="w-full px-4 py-3 rounded-lg mb-4" placeholder="Passwort">
+      <button id="submitPassword" class="w-full bg-indigo-600 hover:bg-indigo-700 py-3 rounded-lg font-semibold">
+        Beitreten
+      </button>
+      <p id="passwordError" class="text-red-400 mt-3 text-sm hidden"></p>
+    </div>
+  </div>
+
   <!-- Loading Screen -->
-  <div id="loadingScreen" class="min-h-screen flex items-center justify-center p-4">
+  <div id="loadingScreen" class="min-h-screen flex items-center justify-center p-4 hidden">
     <div class="text-center">
       <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-500 mx-auto mb-4"></div>
       <p class="text-gray-400" id="loadingText">Verbindung wird hergestellt...</p>
@@ -107,7 +132,6 @@
           <p class="text-sm text-gray-400">Raum: <span id="roomIdDisplay"></span></p>
         </div>
         <div class="flex items-center gap-4">
-          <button id="copyLink" class="px-3 py-1 bg-gray-700 rounded text-sm" title="Link kopieren">Link</button>
           <span id="peerCount" class="text-sm text-gray-400">0 Teilnehmer</span>
           <button id="toggleDebug" class="px-3 py-1 bg-gray-700 rounded text-sm">Debug (D)</button>
         </div>
@@ -165,127 +189,129 @@
   </div>
 
   <script src="js/crypto.js"></script>
-  <script src="js/manual-p2p.js"></script>
-  <script src="js/gun-signaling.js"></script>
+  <script src="js/nostr.js"></script>
+  <script src="js/nostr-signaling.js"></script>
   <script src="js/webrtc.js"></script>
-  <script src="js/relay-tree.js"></script>
 
   <script>
     // Security check for getUserMedia
     (function() {
       const isSecure = window.location.protocol === 'https:' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
       if (!isSecure) {
-        document.write('<div style="background:#ef4444;color:white;padding:1rem;text-align:center;font-weight:bold;">⚠️ HTTPS erforderlich! Bitte öffne diese Seite über https:// oder localhost</div>');
+        document.write('<div style="background:#ef4444;color:white;padding:1rem;text-align:center;font-weight:bold;">⚠️ HTTPS erforderlich!</div>');
       }
     })();
 
     const App = {
       roomId: null,
-      namespace: null,
-      peerId: null,
-      isHost: false,
+      password: null,
+      roomTag: null,
       localStream: null,
       peers: new Map(),
       signaling: null,
       webrtc: null,
-      relayTree: null,
-      manualP2P: null,
       isAudioEnabled: true,
       isVideoEnabled: true,
-      joinLink: '',
-      isManualMode: false,
 
       async init() {
         const params = new URLSearchParams(window.location.search);
         this.roomId = params.get('room');
-        this.namespace = params.get('hash');
-        const dataParam = params.get('data');
         
-        if (dataParam) {
-          await this.initManualP2P(dataParam);
-        } else if (this.roomId && this.namespace) {
-          await this.initAsHost();
-        } else {
-          window.location.href = 'index.html';
-          return;
-        }
-        
-        document.getElementById('loadingScreen').classList.add('hidden');
-        document.getElementById('room').classList.remove('hidden');
-      },
-
-      async initAsHost() {
-        this.isHost = true;
-        this.isManualMode = true;
-        
-        if (!this.roomId || !this.namespace) {
+        if (!this.roomId) {
           window.location.href = 'index.html';
           return;
         }
 
         document.getElementById('roomIdDisplay').textContent = this.roomId;
-        
-        const isHost = sessionStorage.getItem('shuntcall_isHost') === 'true';
-        if (isHost) {
-          this.isHost = true;
-        }
 
-        this.peerId = ShuntCallCrypto.generatePeerId();
-        
-        await this.initMedia();
-        
-        this.showLoading('Generiere Verbindungsdaten...');
-        const p2pData = await ManualP2P.createRoom(this.localStream);
-        
-        this.joinLink = `${window.location.origin}${window.location.pathname}?room=${encodeURIComponent(this.roomId)}&hash=${encodeURIComponent(this.namespace)}&data=${p2pData.roomData}`;
-        
-        console.log('Room created! Share this link:', this.joinLink);
-        
-        this.manualP2P = ManualP2P;
-        this.manualP2P.onRemoteStream = (stream) => {
-          this.addRemoteStream('host', stream);
-        };
-        this.manualP2P.onConnectionStateChange = (state) => {
-          this.updatePeerStatus('host', state);
-        };
-        
-        this.setupEventListeners();
-        this.updatePeerCount();
+        this.setupPasswordModal();
       },
 
-      async initManualP2P(dataParam) {
-        this.isManualMode = true;
-        
-        await this.initMedia();
-        
-        this.showLoading('Verbinde...');
-        
+      setupPasswordModal() {
+        const modal = document.getElementById('passwordModal');
+        const input = document.getElementById('roomPassword');
+        const submit = document.getElementById('submitPassword');
+        const error = document.getElementById('passwordError');
+
+        submit.addEventListener('click', async () => {
+          const password = input.value.trim();
+          if (!password) {
+            error.textContent = 'Bitte gib ein Passwort ein';
+            error.classList.remove('hidden');
+            return;
+          }
+          
+          this.password = password;
+          await this.initRoom();
+        });
+
+        input.addEventListener('keypress', (e) => {
+          if (e.key === 'Enter') {
+            submit.click();
+          }
+        });
+      },
+
+      async initRoom() {
+        document.getElementById('passwordModal').classList.add('hidden');
+        this.showLoading('Verbinde zu Nostr...');
+
         try {
-          this.peerId = await ManualP2P.joinRoom(this.localStream, dataParam);
-          console.log('Connected to host!');
-          
-          this.manualP2P = ManualP2P;
-          this.manualP2P.onRemoteStream = (stream) => {
-            this.addRemoteStream('host', stream);
-          };
-          this.manualP2P.onConnectionStateChange = (state) => {
-            this.updatePeerStatus('host', state);
-          };
-          
-          this.roomId = 'Direct';
-          this.namespace = 'manual';
-          document.getElementById('roomIdDisplay').textContent = 'Direktverbindung';
-          this.joinLink = window.location.href;
-          
+          // Compute room tag from roomId + password
+          this.roomTag = await this.computeRoomTag(this.roomId, this.password);
+          console.log('Room tag:', this.roomTag);
+
+          // Initialize media
+          await this.initMedia();
+
+          // Initialize Nostr signaling
+          this.signaling = NostrSignaling;
+          await this.signaling.init(this.roomId, this.password);
+
+          // Initialize WebRTC
+          this.webrtc = ShuntCallWebRTC;
+          this.webrtc.init(this.localStream, this.signaling.getStatus().pubkey, this.signaling);
+
+          // Setup WebRTC event handlers
+          this.webrtc.on('remoteStream', (data) => {
+            console.log('Remote stream from:', data.peerId.slice(0, 16) + '...');
+            this.addRemoteStream(data.peerId, data.stream);
+          });
+
+          this.webrtc.on('connectionStateChange', (data) => {
+            console.log('Connection state:', data.peerId?.slice(0, 16), data.state);
+            this.updatePeerStatus(data.peerId, data.state);
+          });
+
+          // Setup Nostr event handlers - respond to offers automatically
+          this.signaling.on('offer', async (data) => {
+            console.log('Received offer from:', data.from.slice(0, 16) + '...');
+            // WebRTC handles this automatically via setupSignalingListeners
+          });
+
+          // Broadcast our offer so existing peers can connect to us
+          await this.webrtc.broadcastOffer();
+
+          this.setupEventListeners();
+          this.updatePeerCount();
+
+          document.getElementById('loadingScreen').classList.add('hidden');
+          document.getElementById('room').classList.remove('hidden');
+
         } catch (error) {
-          console.error('Failed to connect:', error);
-          alert('Verbindung fehlgeschlagen. Der Link ist möglicherweise ungültig.');
+          console.error('Init error:', error);
+          alert('Verbindung fehlgeschlagen: ' + error.message);
           window.location.href = 'index.html';
-          return;
         }
-        
-        this.setupEventListeners();
-        this.updatePeerCount();
+      },
+
+      async computeRoomTag(roomId, password) {
+        const input = roomId + ':' + password;
+        const encoder = new TextEncoder();
+        const data = encoder.encode(input);
+        const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
       },
 
       showLoading(text) {
@@ -295,90 +321,27 @@
       },
 
       async initMedia() {
-        // Check HTTPS/Localhost requirement first
         const isSecure = window.location.protocol === 'https:' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
         
         if (!isSecure) {
-          console.error('SECURITY: getUserMedia requires HTTPS or localhost');
-          alert('Kamera-Zugriff erfordert HTTPS oder localhost!\n\nAktueller Status: ' + window.location.protocol + '//' + window.location.hostname + '\n\nBitte nutze https:// oder localhost/ um diese App zu öffnen.');
+          alert('Kamera-Zugriff erfordert HTTPS oder localhost!');
           return;
         }
-        
+
         try {
-          // First, enumerate and log all available devices
-          const devices = await navigator.mediaDevices.enumerateDevices();
-          const videoDevices = devices.filter(d => d.kind === 'videoinput');
-          const audioDevices = devices.filter(d => d.kind === 'audioinput');
-          
-          console.log('=== MEDIA DEVICES DEBUG ===');
-          console.log('Protocol:', window.location.protocol);
-          console.log('Hostname:', window.location.hostname);
-          console.log('Total devices:', devices.length);
-          console.log('Video devices:', videoDevices.length);
-          console.log('Audio devices:', audioDevices.length);
-          videoDevices.forEach((d, i) => console.log(`  Video ${i}:`, d.label || '(no label)', d.deviceId));
-          audioDevices.forEach((d, i) => console.log(`  Audio ${i}:`, d.label || '(no label)', d.deviceId));
-          console.log('============================');
-          
-          if (videoDevices.length === 0) {
-            alert('Keine Kamera gefunden. Bitte schließe eine Kamera an.');
-            return;
-          }
-          
-          // Try with flexible constraints - start simple
-          const constraints = {
+          this.localStream = await navigator.mediaDevices.getUserMedia({
             video: true,
             audio: true
-          };
-          
-          console.log('Requesting getUserMedia with:', JSON.stringify(constraints));
-          
-          this.localStream = await navigator.mediaDevices.getUserMedia(constraints);
-          
-          console.log('getUserMedia SUCCESS! Stream:', this.localStream.id);
-          console.log('Video tracks:', this.localStream.getVideoTracks().length);
-          console.log('Audio tracks:', this.localStream.getAudioTracks().length);
-          
+          });
+
           const localVideo = document.getElementById('localVideo');
           localVideo.srcObject = this.localStream;
           
-          // Log track details
-          this.localStream.getVideoTracks().forEach(track => {
-            console.log('Video track:', track.label, track.settings);
-          });
-          this.localStream.getAudioTracks().forEach(track => {
-            console.log('Audio track:', track.label, track.settings);
-          });
-          
+          console.log('Media initialized');
         } catch (error) {
-          console.error('=== MEDIA ERROR ===');
-          console.error('Error name:', error.name);
-          console.error('Error message:', error.message);
-          console.error('Error constraint:', error.constraint);
-          console.error('Full error:', error);
-          console.error('====================');
-          
-          // Try to get more info
-          try {
-            const devices = await navigator.mediaDevices.enumerateDevices();
-            console.log('Devices at error time:', devices.filter(d => d.kind === 'videoinput').map(d => d.label));
-          } catch(e) {}
-          
-          let msg = 'Kamera/Mikrofon konnte nicht accessiert werden';
-          
-          if (error.name === 'NotAllowedError') {
-            msg = 'Zugriff verweigert. Bitte erlaube Kamera/Mikrofon im Browser.';
-          } else if (error.name === 'NotFoundError') {
-            msg = 'Keine Kamera/Mikrofon gefunden.';
-          } else if (error.name === 'NotReadableError') {
-            msg = 'Kamera wird von einer anderen App verwendet.';
-          } else if (error.name === 'OverconstrainedError') {
-            msg = 'Die angeforderte Auflösung wird nicht unterstützt.';
-          } else if (error.name === 'AbortError') {
-            msg = 'Verbindung zur Kamera wurde abgebrochen.';
-          }
-          
-          alert(msg + '\n\nFehler: ' + error.name + '\n' + error.message + '\n\nBitte öffne die Browser-Konsole (F12) für mehr Details!');
+          console.error('Media error:', error);
+          alert('Kamera/Mikrofon Fehler: ' + error.message);
+          throw error;
         }
       },
 
@@ -400,7 +363,7 @@
         overlay.className = 'video-overlay';
         
         overlay.innerHTML = `
-          <span class="peer-name">${peerId === 'host' ? 'Host' : peerId.substring(0, 8)}</span>
+          <span class="peer-name">${peerId.slice(0, 8)}...</span>
           <div class="flex items-center gap-2">
             <span class="status-indicator status-connected" id="status-${peerId}"></span>
           </div>
@@ -421,8 +384,8 @@
           this.peers.delete(peerId);
         }
         
-        if (this.manualP2P) {
-          this.manualP2P.close();
+        if (this.webrtc) {
+          this.webrtc.closePeerConnection(peerId);
         }
         
         this.updatePeerCount();
@@ -448,14 +411,6 @@
       },
 
       setupEventListeners() {
-        document.getElementById('copyLink').addEventListener('click', () => {
-          navigator.clipboard.writeText(this.joinLink).then(() => {
-            const btn = document.getElementById('copyLink');
-            btn.textContent = 'Kopiert!';
-            setTimeout(() => btn.textContent = 'Link', 2000);
-          });
-        });
-
         document.getElementById('toggleMic').addEventListener('click', () => {
           this.isAudioEnabled = !this.isAudioEnabled;
           this.localStream.getAudioTracks().forEach(track => {
@@ -523,8 +478,11 @@
       },
 
       leaveRoom() {
-        if (this.manualP2P) {
-          this.manualP2P.close();
+        if (this.webrtc) {
+          this.webrtc.destroy();
+        }
+        if (this.signaling) {
+          this.signaling.destroy();
         }
         if (this.localStream) {
           this.localStream.getTracks().forEach(track => track.stop());

@@ -1,6 +1,6 @@
 /**
  * WebRTC Core Module
- * RTCPeerConnection lifecycle management
+ * RTCPeerConnection lifecycle management with Nostr signaling
  */
 
 const ICE_SERVERS = [
@@ -20,12 +20,6 @@ const ShuntCallWebRTC = {
   },
   listeners: {},
 
-  /**
-   * Initialize WebRTC with local stream
-   * @param {MediaStream} localStream - Local video/audio stream
-   * @param {string} peerId - Our peer ID
-   * @param {object} signaling - Signaling module instance
-   */
   init(localStream, peerId, signaling) {
     this.localStream = localStream;
     this.peerId = peerId;
@@ -37,31 +31,18 @@ const ShuntCallWebRTC = {
     return this;
   },
 
-  /**
-   * Setup signaling event listeners
-   */
   setupSignalingListeners() {
     this.signaling.on('offer', async (data) => {
-      console.log('Received offer event from:', data.from);
-      await this.handleOffer(data.from, JSON.parse(data.sdp));
+      console.log('Received offer event from:', data.from.slice(0, 16) + '...');
+      await this.handleOffer(data.from, JSON.parse(data.sdp), data.eventId);
     });
     
     this.signaling.on('answer', async (data) => {
-      console.log('Received answer event from:', data.from);
+      console.log('Received answer event from:', data.from.slice(0, 16) + '...');
       await this.handleAnswer(data.from, JSON.parse(data.sdp));
-    });
-    
-    this.signaling.on('ice', async (data) => {
-      console.log('Received ICE event from:', data.from);
-      await this.handleIceCandidate(data.from, JSON.parse(data.candidate));
     });
   },
 
-  /**
-   * Create a peer connection
-   * @param {string} remotePeerId - Remote peer ID
-   * @returns {RTCPeerConnection}
-   */
   createPeerConnection(remotePeerId) {
     const pc = new RTCPeerConnection(this.config);
     
@@ -76,16 +57,12 @@ const ShuntCallWebRTC = {
         pc.addTrack(track, this.localStream);
       });
     }
-    
+
     pc.onicecandidate = (event) => {
-      if (event.candidate) {
-        console.log('ICE candidate generated for:', remotePeerId);
-        this.signaling.sendIceCandidate(remotePeerId, event.candidate);
-      }
     };
     
     pc.ontrack = (event) => {
-      console.log('Track received from:', remotePeerId);
+      console.log('Track received from:', remotePeerId.slice(0, 16) + '...');
       this.emit('remoteStream', {
         peerId: remotePeerId,
         stream: event.streams[0]
@@ -101,17 +78,12 @@ const ShuntCallWebRTC = {
     };
     
     this.peerConnections[remotePeerId] = pc;
-    console.log('Peer connection created for:', remotePeerId);
+    console.log('Peer connection created for:', remotePeerId.slice(0, 16) + '...');
     return pc;
   },
 
-  /**
-   * Handle incoming offer
-   * @param {string} fromPeerId - Sender peer ID
-   * @param {RTCSessionDescriptionInit} sdp - SDP offer
-   */
-  async handleOffer(fromPeerId, sdp) {
-    console.log('Processing offer from:', fromPeerId);
+  async handleOffer(fromPeerId, sdp, eventId) {
+    console.log('Processing offer from:', fromPeerId.slice(0, 16) + '...');
     
     let pc = this.peerConnections[fromPeerId];
     if (!pc) {
@@ -126,21 +98,18 @@ const ShuntCallWebRTC = {
     const answer = await pc.createAnswer();
     await pc.setLocalDescription(answer);
     
-    console.log('Sending answer to:', fromPeerId);
-    this.signaling.sendAnswer(fromPeerId, answer);
+    await this.waitForIceGathering(pc);
+    
+    console.log('Sending answer to:', fromPeerId.slice(0, 16) + '...');
+    await this.signaling.sendAnswer(fromPeerId, answer, eventId);
   },
 
-  /**
-   * Handle incoming answer
-   * @param {string} fromPeerId - Sender peer ID
-   * @param {RTCSessionDescriptionInit} sdp - SDP answer
-   */
   async handleAnswer(fromPeerId, sdp) {
-    console.log('Processing answer from:', fromPeerId);
+    console.log('Processing answer from:', fromPeerId.slice(0, 16) + '...');
     
     const pc = this.peerConnections[fromPeerId];
     if (!pc) {
-      console.warn('No peer connection for answer:', fromPeerId);
+      console.warn('No peer connection for answer:', fromPeerId.slice(0, 16) + '...');
       return;
     }
     
@@ -150,53 +119,15 @@ const ShuntCallWebRTC = {
     this.processPendingIceCandidates(fromPeerId);
   },
 
-  /**
-   * Handle incoming ICE candidate
-   * @param {string} fromPeerId - Sender peer ID
-   * @param {RTCIceCandidateInit} candidate - ICE candidate
-   */
-  async handleIceCandidate(fromPeerId, candidate) {
-    console.log('Processing ICE from:', fromPeerId);
-    
-    const pc = this.peerConnections[fromPeerId];
-    if (!pc) {
-      console.log('No PC yet, buffering ICE for:', fromPeerId);
-      if (!this.pendingIceCandidates[fromPeerId]) {
-        this.pendingIceCandidates[fromPeerId] = [];
-      }
-      this.pendingIceCandidates[fromPeerId].push(candidate);
-      return;
-    }
-    
-    if (pc.remoteDescription) {
-      try {
-        await pc.addIceCandidate(new RTCIceCandidate(candidate));
-        console.log('ICE candidate added for:', fromPeerId);
-      } catch (error) {
-        console.error('Error adding ICE candidate:', error);
-      }
-    } else {
-      console.log('No remote description, buffering ICE');
-      if (!this.pendingIceCandidates[fromPeerId]) {
-        this.pendingIceCandidates[fromPeerId] = [];
-      }
-      this.pendingIceCandidates[fromPeerId].push(candidate);
-    }
-  },
-
-  /**
-   * Process buffered ICE candidates
-   */
-  async processPendingIceCandidates(peerId) {
+  processPendingIceCandidates(peerId) {
     const pc = this.peerConnections[peerId];
     if (!pc || !this.pendingIceCandidates[peerId]) return;
     
     const candidates = this.pendingIceCandidates[peerId];
-    console.log('Processing', candidates.length, 'buffered ICE candidates');
     
     for (const candidate of candidates) {
       try {
-        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+        pc.addIceCandidate(new RTCIceCandidate(candidate));
       } catch (error) {
         console.error('Error adding buffered ICE:', error);
       }
@@ -205,12 +136,35 @@ const ShuntCallWebRTC = {
     this.pendingIceCandidates[peerId] = [];
   },
 
-  /**
-   * Create and send offer to a peer
-   * @param {string} remotePeerId - Target peer ID
-   */
+  async waitForIceGathering(pc) {
+    return new Promise((resolve) => {
+      if (pc.iceGatheringState === 'complete') {
+        resolve();
+        return;
+      }
+
+      const checkState = () => {
+        if (pc.iceGatheringState === 'complete') {
+          pc.onicecandidate = null;
+          resolve();
+        }
+      };
+
+      pc.onicecandidate = (event) => {
+        if (!event.candidate) {
+          checkState();
+        }
+      };
+
+      setTimeout(() => {
+        pc.onicecandidate = null;
+        resolve();
+      }, 2000);
+    });
+  },
+
   async createOffer(remotePeerId) {
-    console.log('Creating offer for:', remotePeerId);
+    console.log('Creating offer for:', remotePeerId.slice(0, 16) + '...');
     
     let pc = this.peerConnections[remotePeerId];
     if (!pc) {
@@ -220,16 +174,27 @@ const ShuntCallWebRTC = {
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
     
-    console.log('Sending offer to:', remotePeerId);
-    this.signaling.sendOffer(remotePeerId, offer);
+    await this.waitForIceGathering(pc);
+    
+    console.log('Sending offer to:', remotePeerId.slice(0, 16) + '...');
+    await this.signaling.sendOffer(remotePeerId, offer);
   },
 
-  /**
-   * Handle connection state changes
-   * @param {RTCPeerConnection} pc
-   */
+  async broadcastOffer() {
+    console.log('Broadcasting offer to room');
+    
+    const pc = this.createPeerConnection('broadcast');
+    
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    
+    await this.waitForIceGathering(pc);
+    
+    await this.signaling.broadcastOffer(offer);
+  },
+
   handleConnectionStateChange(pc) {
-    console.log(`Peer ${pc.peerId} connection state:`, pc.connectionState);
+    console.log(`Peer ${pc.peerId?.slice(0, 16)} connection state:`, pc.connectionState);
     
     this.emit('connectionStateChange', {
       peerId: pc.peerId,
@@ -241,63 +206,41 @@ const ShuntCallWebRTC = {
     }
   },
 
-  /**
-   * Handle ICE connection state changes
-   * @param {RTCPeerConnection} pc
-   */
   handleICEConnectionStateChange(pc) {
-    console.log(`Peer ${pc.peerId} ICE state:`, pc.iceConnectionState);
+    console.log(`Peer ${pc.peerId?.slice(0, 16)} ICE state:`, pc.iceConnectionState);
     
     if (pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'disconnected') {
       this.attemptReconnect(pc);
     }
   },
 
-  /**
-   * Attempt to reconnect to a peer
-   * @param {RTCPeerConnection} pc
-   */
   async attemptReconnect(pc) {
     if (pc.reconnectAttempts >= pc.maxReconnectAttempts) {
-      console.log(`Max reconnect attempts reached for ${pc.peerId}`);
+      console.log(`Max reconnect attempts reached for ${pc.peerId?.slice(0, 16)}`);
       this.emit('peerDisconnected', { peerId: pc.peerId });
       return;
     }
     
     pc.reconnectAttempts++;
-    console.log(`Attempting reconnect ${pc.reconnectAttempts}/${pc.maxReconnectAttempts} for ${pc.peerId}`);
+    console.log(`Attempting reconnect ${pc.reconnectAttempts}/${pc.maxReconnectAttempts} for ${pc.peerId?.slice(0, 16)}`);
     
     try {
       pc.restartIce();
     } catch (error) {
       console.error('ICE restart failed:', error);
-      await this.createOffer(pc.peerId);
     }
   },
 
-  /**
-   * Get peer connection stats
-   * @param {string} peerId - Peer ID
-   * @returns {Promise<RTCStatsReport>}
-   */
   async getStats(peerId) {
     const pc = this.peerConnections[peerId];
     if (!pc) return null;
     return pc.getStats();
   },
 
-  /**
-   * Get all peer connections
-   * @returns {Object}
-   */
   getAllConnections() {
     return { ...this.peerConnections };
   },
 
-  /**
-   * Close a peer connection
-   * @param {string} peerId - Peer ID to disconnect
-   */
   closePeerConnection(peerId) {
     const pc = this.peerConnections[peerId];
     if (pc) {
@@ -307,19 +250,12 @@ const ShuntCallWebRTC = {
     }
   },
 
-  /**
-   * Close all peer connections
-   */
   closeAllConnections() {
     Object.keys(this.peerConnections).forEach(peerId => {
       this.closePeerConnection(peerId);
     });
   },
 
-  /**
-   * Add local stream tracks
-   * @param {MediaStream} stream
-   */
   addLocalStream(stream) {
     this.localStream = stream;
     
@@ -335,9 +271,6 @@ const ShuntCallWebRTC = {
     });
   },
 
-  /**
-   * Event emitter methods
-   */
   on(event, callback) {
     if (!this.listeners[event]) {
       this.listeners[event] = [];
@@ -355,9 +288,6 @@ const ShuntCallWebRTC = {
     this.listeners[event].forEach(callback => callback(data));
   },
 
-  /**
-   * Destroy WebRTC manager
-   */
   destroy() {
     this.closeAllConnections();
     this.listeners = {};
