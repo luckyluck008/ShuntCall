@@ -88,20 +88,11 @@
 </head>
 <body class="bg-gray-900 text-white">
   
-  <!-- Password Gate -->
-  <div id="passwordGate" class="min-h-screen flex items-center justify-center p-4">
-    <div class="bg-gray-800 rounded-2xl p-8 max-w-md w-full">
-      <h2 class="text-2xl font-bold mb-4">Raum beitreten</h2>
-      <p class="text-gray-400 mb-6">Gib das Passwort ein, um dem Raum beizutreten.</p>
-      <form id="passwordForm" class="space-y-4">
-        <div>
-          <input type="password" id="roomPassword" class="w-full px-4 py-3 bg-gray-700 rounded-lg border border-gray-600" placeholder="Passwort">
-        </div>
-        <button type="submit" class="w-full py-3 bg-indigo-600 rounded-lg font-semibold hover:bg-indigo-700">
-          Beitreten
-        </button>
-      </form>
-      <p id="passwordError" class="text-red-400 mt-4 hidden"></p>
+  <!-- Loading Screen -->
+  <div id="loadingScreen" class="min-h-screen flex items-center justify-center p-4">
+    <div class="text-center">
+      <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-500 mx-auto mb-4"></div>
+      <p class="text-gray-400" id="loadingText">Verbindung wird hergestellt...</p>
     </div>
   </div>
 
@@ -174,6 +165,7 @@
   </div>
 
   <script src="js/crypto.js"></script>
+  <script src="js/manual-p2p.js"></script>
   <script src="js/gun-signaling.js"></script>
   <script src="js/webrtc.js"></script>
   <script src="js/relay-tree.js"></script>
@@ -189,22 +181,40 @@
       signaling: null,
       webrtc: null,
       relayTree: null,
+      manualP2P: null,
       isAudioEnabled: true,
       isVideoEnabled: true,
       joinLink: '',
+      isManualMode: false,
 
       async init() {
         const params = new URLSearchParams(window.location.search);
         this.roomId = params.get('room');
         this.namespace = params.get('hash');
+        const dataParam = params.get('data');
+        
+        if (dataParam) {
+          await this.initManualP2P(dataParam);
+        } else if (this.roomId && this.namespace) {
+          await this.initAsHost();
+        } else {
+          window.location.href = 'index.html';
+          return;
+        }
+        
+        document.getElementById('loadingScreen').classList.add('hidden');
+        document.getElementById('room').classList.remove('hidden');
+      },
+
+      async initAsHost() {
+        this.isHost = true;
+        this.isManualMode = true;
         
         if (!this.roomId || !this.namespace) {
           window.location.href = 'index.html';
           return;
         }
 
-        this.joinLink = `${window.location.origin}${window.location.pathname}?room=${encodeURIComponent(this.roomId)}&hash=${this.namespace}`;
-        
         document.getElementById('roomIdDisplay').textContent = this.roomId;
         
         const isHost = sessionStorage.getItem('shuntcall_isHost') === 'true';
@@ -215,14 +225,65 @@
         this.peerId = ShuntCallCrypto.generatePeerId();
         
         await this.initMedia();
-        await this.initSignaling();
-        this.initWebRTC();
-        this.initRelayTree();
-        this.setupEventListeners();
-        this.pollForPeers();
         
-        document.getElementById('passwordGate').classList.add('hidden');
-        document.getElementById('room').classList.remove('hidden');
+        this.showLoading('Generiere Verbindungsdaten...');
+        const p2pData = await ManualP2P.createRoom(this.localStream);
+        
+        this.joinLink = `${window.location.origin}${window.location.pathname}?room=${encodeURIComponent(this.roomId)}&hash=${encodeURIComponent(this.namespace)}&data=${p2pData.roomData}`;
+        
+        console.log('Room created! Share this link:', this.joinLink);
+        
+        this.manualP2P = ManualP2P;
+        this.manualP2P.onRemoteStream = (stream) => {
+          this.addRemoteStream('host', stream);
+        };
+        this.manualP2P.onConnectionStateChange = (state) => {
+          this.updatePeerStatus('host', state);
+        };
+        
+        this.setupEventListeners();
+        this.updatePeerCount();
+      },
+
+      async initManualP2P(dataParam) {
+        this.isManualMode = true;
+        
+        await this.initMedia();
+        
+        this.showLoading('Verbinde...');
+        
+        try {
+          this.peerId = await ManualP2P.joinRoom(this.localStream, dataParam);
+          console.log('Connected to host!');
+          
+          this.manualP2P = ManualP2P;
+          this.manualP2P.onRemoteStream = (stream) => {
+            this.addRemoteStream('host', stream);
+          };
+          this.manualP2P.onConnectionStateChange = (state) => {
+            this.updatePeerStatus('host', state);
+          };
+          
+          this.roomId = 'Direct';
+          this.namespace = 'manual';
+          document.getElementById('roomIdDisplay').textContent = 'Direktverbindung';
+          this.joinLink = window.location.href;
+          
+        } catch (error) {
+          console.error('Failed to connect:', error);
+          alert('Verbindung fehlgeschlagen. Der Link ist möglicherweise ungültig.');
+          window.location.href = 'index.html';
+          return;
+        }
+        
+        this.setupEventListeners();
+        this.updatePeerCount();
+      },
+
+      showLoading(text) {
+        document.getElementById('loadingText').textContent = text;
+        document.getElementById('loadingScreen').classList.remove('hidden');
+        document.getElementById('room').classList.add('hidden');
       },
 
       async initMedia() {
@@ -238,88 +299,6 @@
           console.error('Error accessing media devices:', error);
           alert('Kamera/Mikrofon konnte nicht accessiert werden.');
         }
-      },
-
-      async initSignaling() {
-        this.signaling = await ShuntCallSignaling.init(this.namespace, this.peerId);
-        
-        this.signaling.on('peer:join', async (data) => {
-          console.log('Received peer:join event for:', data.id);
-          await this.handlePeerJoin(data.id);
-        });
-        
-        setTimeout(async () => {
-          const existingPeers = await this.signaling.getPeers();
-          console.log('Existing peers found:', existingPeers);
-          for (const peerId of existingPeers) {
-            if (peerId !== this.peerId) {
-              await this.handlePeerJoin(peerId);
-            }
-          }
-        }, 2000);
-      },
-
-      initWebRTC() {
-        this.webrtc = ShuntCallWebRTC.init(this.localStream, this.peerId, this.signaling);
-        
-        this.webrtc.on('remoteStream', (data) => {
-          this.addRemoteStream(data.peerId, data.stream);
-        });
-        
-        this.webrtc.on('peerDisconnected', (data) => {
-          this.removePeer(data.peerId);
-        });
-        
-        this.webrtc.on('connectionStateChange', (data) => {
-          this.updatePeerStatus(data.peerId, data.state);
-        });
-      },
-
-      initRelayTree() {
-        this.relayTree = ShuntCallRelayTree.init(this.peerId, this.webrtc);
-        
-        this.relayTree.on('peerAdded', (data) => {
-          this.updatePeerCount();
-        });
-        
-        this.relayTree.on('peerRemoved', (data) => {
-          this.updatePeerCount();
-        });
-      },
-
-      async handlePeerJoin(peerId) {
-        console.log('Peer joined:', peerId);
-        
-        if (this.peers.has(peerId)) {
-          console.log('Peer already connected:', peerId);
-          return;
-        }
-        
-        this.relayTree.addPeer(peerId);
-        
-        console.log('Initiating connection to:', peerId);
-        await this.webrtc.createOffer(peerId);
-      },
-
-      async pollForPeers() {
-        setInterval(async () => {
-          const peers = await this.signaling.getPeers();
-          for (const peerId of peers) {
-            if (!this.peers.has(peerId) && peerId !== this.peerId) {
-              console.log('Polled peer:', peerId);
-              await this.handlePeerJoin(peerId);
-            }
-          }
-          
-          const conns = this.webrtc.getAllConnections();
-          for (const [peerId, pc] of Object.entries(conns)) {
-            if (pc.connectionState === 'new' || pc.connectionState === 'checking') {
-              console.log('Retrying connection to:', peerId);
-              this.webrtc.closePeerConnection(peerId);
-              await this.handlePeerJoin(peerId);
-            }
-          }
-        }, 3000);
       },
 
       addRemoteStream(peerId, stream) {
@@ -339,13 +318,10 @@
         const overlay = document.createElement('div');
         overlay.className = 'video-overlay';
         
-        const hops = this.relayTree.getHops(peerId);
-        
         overlay.innerHTML = `
-          <span class="peer-name">${peerId.substring(0, 8)}</span>
+          <span class="peer-name">${peerId === 'host' ? 'Host' : peerId.substring(0, 8)}</span>
           <div class="flex items-center gap-2">
-            <span class="hop-badge">${hops}H</span>
-            <span class="status-indicator status-connecting" id="status-${peerId}"></span>
+            <span class="status-indicator status-connected" id="status-${peerId}"></span>
           </div>
         `;
         
@@ -364,8 +340,10 @@
           this.peers.delete(peerId);
         }
         
-        this.relayTree.removePeer(peerId);
-        this.webrtc.closePeerConnection(peerId);
+        if (this.manualP2P) {
+          this.manualP2P.close();
+        }
+        
         this.updatePeerCount();
       },
 
@@ -397,25 +375,6 @@
           });
         });
 
-        document.getElementById('passwordForm').addEventListener('submit', async (e) => {
-          e.preventDefault();
-          const password = document.getElementById('roomPassword').value;
-          
-          const encoder = new TextEncoder();
-          const data = encoder.encode(this.roomId + ':' + password);
-          const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-          const hashArray = Array.from(new Uint8Array(hashBuffer));
-          const hash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-          
-          if (hash !== this.namespace) {
-            document.getElementById('passwordError').textContent = 'Falsches Passwort';
-            document.getElementById('passwordError').classList.remove('hidden');
-            return;
-          }
-          
-          this.init();
-        });
-
         document.getElementById('toggleMic').addEventListener('click', () => {
           this.isAudioEnabled = !this.isAudioEnabled;
           this.localStream.getAudioTracks().forEach(track => {
@@ -444,13 +403,14 @@
             }
             
             this.localStream.addTrack(screenTrack);
-            this.webrtc.addLocalStream(this.localStream);
+            const localVideo = document.getElementById('localVideo');
+            localVideo.srcObject = this.localStream;
             
             screenTrack.onended = async () => {
               const newStream = await navigator.mediaDevices.getUserMedia({ video: true });
               const newVideoTrack = newStream.getVideoTracks()[0];
               this.localStream.addTrack(newVideoTrack);
-              this.webrtc.addLocalStream(this.localStream);
+              localVideo.srcObject = this.localStream;
             };
           } catch (error) {
             console.error('Screen share error:', error);
@@ -479,35 +439,11 @@
             document.getElementById('debugPanel').classList.toggle('hidden');
           }
         });
-
-        setInterval(() => {
-          this.updateDebugPanel();
-        }, 2000);
-      },
-
-      updateDebugPanel() {
-        const content = document.getElementById('debugContent');
-        const tree = this.relayTree.getTree();
-        const asciiTree = this.relayTree.getAsciiTree();
-        
-        content.innerHTML = `
-          <pre class="whitespace-pre-wrap">${asciiTree}</pre>
-          <div class="mt-2">
-            <strong>Peers:</strong> ${this.peers.size + 1}<br>
-            <strong>Verbindungen:</strong> ${Object.keys(this.webrtc.getAllConnections()).length}
-          </div>
-        `;
       },
 
       leaveRoom() {
-        if (this.signaling) {
-          this.signaling.leave();
-        }
-        if (this.webrtc) {
-          this.webrtc.destroy();
-        }
-        if (this.relayTree) {
-          this.relayTree.destroy();
+        if (this.manualP2P) {
+          this.manualP2P.close();
         }
         if (this.localStream) {
           this.localStream.getTracks().forEach(track => track.stop());
@@ -517,14 +453,7 @@
     };
 
     document.addEventListener('DOMContentLoaded', () => {
-      const params = new URLSearchParams(window.location.search);
-      const hasRoom = params.has('room') && params.has('hash');
-      
-      if (hasRoom) {
-        App.init();
-      } else {
-        window.location.href = 'index.html';
-      }
+      App.init();
     });
   </script>
 </body>

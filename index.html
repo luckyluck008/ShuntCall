@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ShuntCall - P2P Video Chat</title>
   <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <script src="js/crypto.js"></script>
+  <script src="js/manual-p2p.js"></script>
   <style>
     body { font-family: system-ui, -apple-system, sans-serif; }
     .gradient-bg { background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%); }
@@ -47,7 +49,7 @@
           <div>
             <label class="block text-sm font-medium text-gray-300 mb-2">Raum-ID</label>
             <div class="flex gap-2">
-              <input type="text" id="createRoomId" class="input-field flex-1 px-4 py-3 rounded-lg" placeholder="mein-raum" pattern="[a-zA-Z0-9_-]+">
+              <input type="text" id="createRoomId" class="input-field flex-1 px-4 py-3 rounded-lg" placeholder="mein-raum">
               <button type="button" id="generateId" class="btn-secondary px-4 py-2 rounded-lg" title="Zufällige ID generieren">
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
@@ -65,6 +67,12 @@
             Raum erstellen
           </button>
         </form>
+        
+        <!-- Loading Section -->
+        <div id="loadingSection" class="text-center py-8 hidden">
+          <div class="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-500 mx-auto mb-4"></div>
+          <p class="text-gray-400">Kamera wird gestartet...</p>
+        </div>
       </div>
 
       <!-- Join Room Card -->
@@ -78,13 +86,8 @@
         
         <form id="joinForm" class="space-y-4">
           <div>
-            <label class="block text-sm font-medium text-gray-300 mb-2">Raum-ID</label>
-            <input type="text" id="joinRoomId" class="input-field w-full px-4 py-3 rounded-lg" placeholder="mein-raum" pattern="[a-zA-Z0-9_-]+">
-          </div>
-          
-          <div>
-            <label class="block text-sm font-medium text-gray-300 mb-2">Passwort</label>
-            <input type="password" id="joinPassword" class="input-field w-full px-4 py-3 rounded-lg" placeholder="Passwort eingeben">
+            <label class="block text-sm font-medium text-gray-300 mb-2">Einladungslink</label>
+            <input type="text" id="joinLink" class="input-field w-full px-4 py-3 rounded-lg" placeholder="https://...">
           </div>
           
           <button type="submit" class="btn-secondary w-full py-3 rounded-lg font-semibold">
@@ -96,7 +99,7 @@
 
     <!-- Share Link Section -->
     <div id="shareSection" class="card rounded-2xl p-6 mt-8 w-full max-w-2xl hidden">
-      <h3 class="text-lg font-semibold mb-3">Einladungslink</h3>
+      <h3 class="text-lg font-semibold mb-3">Einladungslink (teilen mit anderen)</h3>
       <div class="flex gap-2">
         <input type="text" id="shareLink" class="input-field flex-1 px-4 py-3 rounded-lg text-sm" readonly>
         <button type="button" id="copyLink" class="btn-primary px-6 py-2 rounded-lg font-medium">
@@ -117,7 +120,6 @@
   </div>
 
   <script>
-    // Utility: Generate random room ID
     function generateRoomId() {
       const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
       let result = '';
@@ -127,12 +129,10 @@
       return result;
     }
 
-    // Generate room ID on button click
     document.getElementById('generateId').addEventListener('click', () => {
       document.getElementById('createRoomId').value = generateRoomId();
     });
 
-    // Show error message
     function showError(message) {
       const errorEl = document.getElementById('errorMessage');
       errorEl.textContent = message;
@@ -140,7 +140,6 @@
       setTimeout(() => errorEl.classList.add('hidden'), 5000);
     }
 
-    // Handle room creation
     document.getElementById('createForm').addEventListener('submit', async (e) => {
       e.preventDefault();
       const roomId = document.getElementById('createRoomId').value.trim();
@@ -155,77 +154,65 @@
         return;
       }
 
-      // Generate hash from roomId + password
       const encoder = new TextEncoder();
       const data = encoder.encode(roomId + ':' + password);
       const hashBuffer = await crypto.subtle.digest('SHA-256', data);
       const hashArray = Array.from(new Uint8Array(hashBuffer));
       const hash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 
-      // Build share link
-      const baseUrl = window.location.origin + window.location.pathname.replace(/\/[^\/]*$/, '/');
-      const shareLink = `${baseUrl}room.html?room=${encodeURIComponent(roomId)}&hash=${hash}`;
+      document.getElementById('createForm').classList.add('hidden');
+      document.getElementById('loadingSection').classList.remove('hidden');
 
-      // Show share section
-      document.getElementById('shareLink').value = shareLink;
-      document.getElementById('shareSection').classList.remove('hidden');
+      try {
+        const localStream = await navigator.mediaDevices.getUserMedia({
+          video: { width: 640, height: 480 },
+          audio: true
+        });
 
-      // Store for later use
-      sessionStorage.setItem('shuntcall_roomId', roomId);
-      sessionStorage.setItem('shuntcall_hash', hash);
-      sessionStorage.setItem('shuntcall_isHost', 'true');
+        const p2pData = await ManualP2P.createRoom(localStream);
+        
+        localStream.getTracks().forEach(track => track.stop());
 
-      // Navigate to room
-      window.location.href = shareLink;
+        const baseUrl = window.location.origin + window.location.pathname.replace(/\/[^\/]*$/, '/');
+        const shareLink = `${baseUrl}room.html?room=${encodeURIComponent(roomId)}&hash=${hash}&data=${p2pData.roomData}`;
+
+        document.getElementById('loadingSection').classList.add('hidden');
+        document.getElementById('shareLink').value = shareLink;
+        document.getElementById('shareSection').classList.remove('hidden');
+
+      } catch (error) {
+        console.error('Error creating room:', error);
+        showError('Kamera/Mikrofon konnte nicht accessiert werden');
+        document.getElementById('loadingSection').classList.add('hidden');
+        document.getElementById('createForm').classList.remove('hidden');
+      }
     });
 
-    // Handle room joining
-    document.getElementById('joinForm').addEventListener('submit', async (e) => {
+    document.getElementById('joinForm').addEventListener('submit', (e) => {
       e.preventDefault();
-      const roomId = document.getElementById('joinRoomId').value.trim();
-      const password = document.getElementById('joinPassword').value;
+      const joinLink = document.getElementById('joinLink').value.trim();
 
-      if (!roomId) {
-        showError('Bitte gib eine Raum-ID ein');
-        return;
-      }
-      if (!password) {
-        showError('Bitte gib das Passwort ein');
+      if (!joinLink) {
+        showError('Bitte füge den Einladungslink ein');
         return;
       }
 
-      // Generate hash from roomId + password
-      const encoder = new TextEncoder();
-      const data = encoder.encode(roomId + ':' + password);
-      const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-      const hashArray = Array.from(new Uint8Array(hashBuffer));
-      const hash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-
-      // Store for later use
-      sessionStorage.setItem('shuntcall_roomId', roomId);
-      sessionStorage.setItem('shuntcall_hash', hash);
-      sessionStorage.setItem('shuntcall_isHost', 'false');
-
-      // Navigate to room
-      const baseUrl = window.location.origin + window.location.pathname.replace(/\/[^\/]*$/, '/');
-      window.location.href = `${baseUrl}room.html?room=${encodeURIComponent(roomId)}&hash=${hash}`;
+      window.location.href = joinLink;
     });
 
-    // Copy link to clipboard
     document.getElementById('copyLink').addEventListener('click', () => {
       const linkInput = document.getElementById('shareLink');
       linkInput.select();
-      document.execCommand('copy');
+      navigator.clipboard.writeText(linkInput.value);
       
       const btn = document.getElementById('copyLink');
       btn.textContent = 'Kopiert!';
       setTimeout(() => btn.textContent = 'Kopieren', 2000);
     });
 
-    // Check for URL params (pre-filled join)
     const urlParams = new URLSearchParams(window.location.search);
     if (urlParams.has('room')) {
-      document.getElementById('joinRoomId').value = urlParams.get('room');
+      document.getElementById('joinLink').value = window.location.href;
     }
   </script>
 </body>
