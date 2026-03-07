@@ -256,7 +256,9 @@ const Nostr = {
 
   send(msg) {
     try {
-      const data = JSON.stringify(msg);
+      // Deep copy to break cyclic references
+      const cleanMsg = JSON.parse(JSON.stringify(msg));
+      const data = JSON.stringify(cleanMsg);
       
       Object.keys(this.relays).forEach(url => {
         const ws = this.relays[url];
