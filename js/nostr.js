@@ -146,11 +146,13 @@ const Nostr = {
     const [type, subId, data] = msg;
     
     if (type === 'EVENT') {
+      console.log('Nostr: Got EVENT for sub', subId, 'kind:', data?.kind, 'tags:', data?.tags);
       const subscription = this.subscriptions[subId];
       if (subscription) {
         subscription.callback(data);
       }
     } else if (type === 'EOSE') {
+      console.log('Nostr: Got EOSE for sub', subId);
       const subscription = this.subscriptions[subId];
       if (subscription) {
         subscription.eose = true;
@@ -158,10 +160,13 @@ const Nostr = {
           subscription.onEose();
         }
       }
+    } else {
+      console.log('Nostr: Unknown message type:', type);
     }
   },
 
   subscribe(subId, filters, callback, onEose = null) {
+    console.log('Nostr: Creating subscription', subId, 'with filters', JSON.stringify(filters));
     this.subscriptions[subId] = { filters, callback, onEose, eose: false };
     
     const msg = ['REQ', subId, filters];
