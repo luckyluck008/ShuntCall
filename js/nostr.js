@@ -256,9 +256,17 @@ const Nostr = {
 
   send(msg) {
     try {
-      // Deep copy to break cyclic references
-      const cleanMsg = JSON.parse(JSON.stringify(msg));
-      const data = JSON.stringify(cleanMsg);
+      // Handle cyclic references
+      const seen = new WeakSet();
+      const data = JSON.stringify(msg, (key, value) => {
+        if (typeof value === 'object' && value !== null) {
+          if (seen.has(value)) {
+            return '[Circular Reference]';
+          }
+          seen.add(value);
+        }
+        return value;
+      });
       
       Object.keys(this.relays).forEach(url => {
         const ws = this.relays[url];
