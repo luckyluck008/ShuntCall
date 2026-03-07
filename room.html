@@ -482,9 +482,13 @@
         document.getElementById('togglePiP').addEventListener('click', async () => {
           const localVideo = document.getElementById('localVideo');
           try {
+            if (!document.pictureInPictureEnabled) {
+              console.log('PiP not supported');
+              return;
+            }
             if (document.pictureInPictureElement) {
               await document.exitPictureInPicture();
-            } else {
+            } else if (localVideo.requestPictureInPicture) {
               await localVideo.requestPictureInPicture();
             }
           } catch (error) {
