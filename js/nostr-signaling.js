@@ -35,10 +35,13 @@ const NostrSignaling = {
   },
 
   setupSubscriptions() {
-    // Nostr filter format: #t should be array of arrays
+    // Get events from the last 60 seconds to catch offers published before we subscribed
+    const since = Math.floor(Date.now() / 1000) - 60;
+    
     const filters = {
       kinds: [EVENT_KIND],
-      '#t': [[this.roomTag]]
+      '#t': [this.roomTag],
+      since: since
     };
 
     console.log('NostrSignaling: Subscribing with filters', filters);
@@ -46,6 +49,8 @@ const NostrSignaling = {
     this.nostr.subscribe('room-' + this.roomTag, filters, (event) => {
       console.log('NostrSignaling: Received event from', event.pubkey?.slice(0, 16), 'content type:', event.content ? JSON.parse(event.content).type : 'none');
       this.handleIncomingEvent(event);
+    }, () => {
+      console.log('NostrSignaling: EOSE received');
     });
   },
 
