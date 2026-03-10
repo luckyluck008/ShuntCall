@@ -155,14 +155,6 @@ const ShuntCallWebRTC = {
         });
       };
       
-      // Emit trackReceived event immediately
-      this.emit('trackReceived', {
-        peerId: remotePeerId,
-        track,
-        stream: streams[0],
-        kind: track.kind
-      });
-      
       // Emit both remoteStream and track events for flexibility
       this.emit('remoteStream', {
         peerId: remotePeerId,
@@ -229,9 +221,6 @@ const ShuntCallWebRTC = {
       hasAudio: answer.sdp.includes('m=audio'),
       sdpSize: answer.sdp.length
     });
-    
-    // Log SDP details for debugging
-    console.log('Original answer SDP:', answer.sdp.substring(0, 200) + '...');
 
     const optimizedAnswer = this.optimizeSDP(answer);
     await pc.setLocalDescription(optimizedAnswer);
@@ -341,10 +330,7 @@ const ShuntCallWebRTC = {
       hasVideo: offer.sdp.includes('m=video'),
       hasAudio: offer.sdp.includes('m=audio')
     });
-    
-    // Log SDP details for debugging
-    console.log('Original offer SDP:', offer.sdp.substring(0, 200) + '...');
-    
+
     // Optimize SDP for better compatibility
     const optimizedOffer = this.optimizeSDP(offer);
     

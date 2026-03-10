@@ -332,6 +332,11 @@
            this.webrtc.init(this.localStream, ourPubkey, this.signaling);
 
             // Setup WebRTC event handlers
+            this.webrtc.on('remoteStream', (data) => {
+              console.log('Remote stream from:', data.peerId.slice(0, 16) + '...');
+              this.addRemoteStream(data.peerId, data.stream);
+            });
+
             this.webrtc.on('trackReceived', (data) => {
               console.log('Track received:', {
                 peerId: data.peerId.slice(0, 8),
@@ -340,13 +345,7 @@
                 streamId: data.stream.id
               });
               this.addDebugMessage(`TRACK_RECEIVED: ${data.kind} from ${data.peerId.slice(0, 8)}...`);
-              
-              // Handle track by creating or updating stream
-              if (!this.peers.has(data.peerId)) {
-                this.addRemoteStream(data.peerId, data.stream);
-              }
             });
-
             this.webrtc.on('trackError', (data) => {
               console.error('Track error:', data);
               this.addDebugMessage(`TRACK_ERROR: ${data.kind} from ${data.peerId.slice(0, 8)} - ${data.error}`);
@@ -577,19 +576,8 @@
          }, 5000);
        },
 
-       addRemoteStream(peerId, stream) {
-         if (this.peers.has(peerId)) {
-           const existingPeer = this.peers.get(peerId);
-           if (existingPeer.stream !== stream) {
-             console.log('Updating existing peer stream');
-             existingPeer.stream = stream;
-             const video = existingPeer.container.querySelector('video');
-             if (video) {
-               video.srcObject = stream;
-             }
-           }
-           return;
-         }
+        addRemoteStream(peerId, stream) {
+          if (this.peers.has(peerId)) return;
          
          console.log('Adding remote stream:', {
            peerId: peerId.slice(0, 8),
