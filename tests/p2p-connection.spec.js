@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 
 test.describe('Manual P2P Connection Tests', () => {
-  test('host can create room and generates link with data', async ({ browser }) => {
+  test('host can create room and generates link', async ({ browser }) => {
     const context = await browser.newContext({
       permissions: ['camera', 'microphone']
     });
@@ -17,19 +17,20 @@ test.describe('Manual P2P Connection Tests', () => {
     
     await page.click('button:has-text("Raum erstellen")');
     
-    await page.waitForURL(/room\.html/, { timeout: 10000 });
+    // Wait for share section to be visible
+    await page.waitForSelector('#shareSection:not(.hidden)', { timeout: 10000 });
     
-    const url = page.url();
-    console.log('Created room URL:', url);
+    // Get share link from input field
+    const shareLink = await page.inputValue('#shareLink');
+    console.log('Created room URL:', shareLink);
     
-    expect(url).toContain('data=');
-    expect(url).toContain('room=');
-    expect(url).toContain('hash=');
+    expect(shareLink).toContain('room.html?room=');
+    expect(shareLink).not.toContain('password');
     
     await context.close();
   });
   
-  test('guest can join via link with data param', async ({ browser }) => {
+  test('guest can join via link', async ({ browser }) => {
     const context1 = await browser.newContext({
       permissions: ['camera', 'microphone']
     });
@@ -45,15 +46,27 @@ test.describe('Manual P2P Connection Tests', () => {
     await page1.fill('#createPassword', 'test123');
     await page1.click('button:has-text("Raum erstellen")');
     
-    await page1.waitForURL(/room\.html\?.*data=/, { timeout: 10000 });
-    const roomUrl = page1.url();
-    console.log('Room URL with data:', roomUrl);
+    await page1.waitForSelector('#shareSection:not(.hidden)', { timeout: 10000 });
+    const roomUrl = await page1.inputValue('#shareLink');
+    console.log('Room URL:', roomUrl);
     
     const page2 = await context2.newPage();
     page2.on('console', msg => console.log('P2:', msg.text()));
     
     await page2.goto(roomUrl);
     
+    // Wait for password modal
+    await page2.waitForSelector('#passwordModal', { timeout: 5000 });
+    
+    // Enter password
+    await page2.fill('#roomPassword', 'test123');
+    await page2.click('button:has-text("Beitreten")');
+    
+    // Wait for media permission modal and accept
+    await page2.waitForSelector('#mediaPermissionModal', { timeout: 5000 });
+    await page2.click('button:has-text("Akzeptieren")');
+    
+    // Wait for room to be visible
     await page2.waitForSelector('#room:not(.hidden)', { timeout: 15000 });
     
     const roomVisible = await page2.locator('#room').isVisible();

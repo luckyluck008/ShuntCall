@@ -13,5 +13,8 @@
     "gun": "^0.2020.1241",
     "http-server": "^14.1.1"
   },
-  "type": "module"
+  "type": "module",
+  "dependencies": {
+    "nostr-tools": "^2.23.3"
+  }
 }

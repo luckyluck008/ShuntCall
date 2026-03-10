@@ -164,12 +164,12 @@ const NostrSignaling = {
     }
   },
 
-   async broadcastOffer(sdp) {
+   async broadcastOffer(offer) {
     try {
       console.log('NostrSignaling: Broadcasting offer to room');
       const payload = {
         type: 'offer',
-        sdp: sdp,
+        sdp: offer.sdp,
         from: this.nostr.keys.publicKey
       };
 

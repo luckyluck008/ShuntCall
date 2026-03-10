@@ -232,7 +232,6 @@ const ShuntCallWebRTC = {
       console.log('WebRTC: Creating offer for broadcast');
       
       // Create a dummy peer connection for broadcast
-      // Note: For broadcast, we just need to generate the offer without a specific peer
       const dummyPeerId = 'broadcast';
       let pc = this.peerConnections[dummyPeerId];
       if (!pc) {
@@ -246,11 +245,8 @@ const ShuntCallWebRTC = {
       
       console.log('Sending broadcast offer');
       
-      // Send just the necessary data (avoid RTCSessionDescription object)
-      await this.signaling.broadcastOffer({
-        type: offer.type,
-        sdp: offer.sdp
-      });
+      // Send the actual RTCSessionDescription or just the SDP string
+      await this.signaling.broadcastOffer(offer);
       
     } catch (error) {
       console.error('WebRTC: Broadcast offer error', error);

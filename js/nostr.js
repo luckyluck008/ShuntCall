@@ -238,7 +238,8 @@ const Nostr = {
       };
       
       event.id = window.NostrTools.getEventHash(event);
-      event.sig = window.NostrTools.finalizeEvent(event, this.keys.privateKey);
+      const signedEvent = window.NostrTools.finalizeEvent(event, this.keys.privateKey);
+      event.sig = signedEvent.sig;
       
       const msg = ['EVENT', event];
       this.send(msg);

@@ -350,7 +350,7 @@
         document.getElementById('room').classList.add('hidden');
       },
 
-      async initMedia() {
+       async initMedia() {
         const isSecure = window.location.protocol === 'https:' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
         
         if (!isSecure) {
@@ -358,10 +358,19 @@
           return;
         }
 
+        // Show media permission prompt
+        this.showMediaPermissionModal();
+        
+        // Wait for user to confirm media access
+        await new Promise((resolve, reject) => {
+          this.mediaPermissionResolve = resolve;
+          this.mediaPermissionReject = reject;
+        });
+
         try {
           this.localStream = await navigator.mediaDevices.getUserMedia({
-            video: true,
-            audio: true
+            video: this.mediaOptions.video,
+            audio: this.mediaOptions.audio
           });
 
           const localVideo = document.getElementById('localVideo');
@@ -373,6 +382,66 @@
           alert('Kamera/Mikrofon Fehler: ' + error.message);
           throw error;
         }
+      },
+
+      showMediaPermissionModal() {
+        // Create media permission modal
+        const modal = document.createElement('div');
+        modal.className = 'password-modal';
+        modal.id = 'mediaPermissionModal';
+        modal.innerHTML = `
+          <div class="bg-gray-800 p-8 rounded-2xl max-w-md w-full">
+            <h2 class="text-2xl font-bold mb-4">Medienzugriff</h2>
+            <p class="text-gray-400 mb-6">Bitte wähle, welche Medien du teilen möchtest:</p>
+            
+            <div class="space-y-4 mb-6">
+              <label class="flex items-center gap-3">
+                <input type="checkbox" id="enableVideo" checked class="w-4 h-4 text-indigo-600 rounded">
+                <span>Kamera</span>
+              </label>
+              <label class="flex items-center gap-3">
+                <input type="checkbox" id="enableAudio" checked class="w-4 h-4 text-indigo-600 rounded">
+                <span>Mikrofon</span>
+              </label>
+            </div>
+            
+            <div class="flex gap-3">
+              <button id="mediaPermissionAccept" class="flex-1 bg-indigo-600 hover:bg-indigo-700 py-3 rounded-lg font-semibold">
+                Akzeptieren
+              </button>
+              <button id="mediaPermissionDecline" class="flex-1 bg-gray-600 hover:bg-gray-700 py-3 rounded-lg font-semibold">
+                Ablehnen
+              </button>
+            </div>
+          </div>
+        `;
+        
+        document.body.appendChild(modal);
+        
+        // Set default media options
+        this.mediaOptions = {
+          video: true,
+          audio: true
+        };
+        
+        // Add event listeners
+        document.getElementById('enableVideo').addEventListener('change', (e) => {
+          this.mediaOptions.video = e.target.checked;
+        });
+        
+        document.getElementById('enableAudio').addEventListener('change', (e) => {
+          this.mediaOptions.audio = e.target.checked;
+        });
+        
+        document.getElementById('mediaPermissionAccept').addEventListener('click', () => {
+          modal.remove();
+          this.mediaPermissionResolve();
+        });
+        
+        document.getElementById('mediaPermissionDecline').addEventListener('click', () => {
+          modal.remove();
+          this.mediaPermissionReject(new Error('Medienzugriff abgelehnt'));
+        });
       },
 
       addRemoteStream(peerId, stream) {
