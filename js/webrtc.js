@@ -81,7 +81,7 @@ const ShuntCallWebRTC = {
     await this.createOffer(fromPeerId);
   },
 
-  createPeerConnection(remotePeerId) {
+   createPeerConnection(remotePeerId) {
     const pc = new RTCPeerConnection(this.config);
     
     pc.peerId = remotePeerId;
@@ -91,9 +91,19 @@ const ShuntCallWebRTC = {
     this.pendingIceCandidates[remotePeerId] = [];
     
     if (this.localStream) {
+      console.log('Adding local tracks to peer connection:', this.localStream.getTracks().map(t => ({
+        kind: t.kind,
+        id: t.id,
+        readyState: t.readyState,
+        enabled: t.enabled
+      })));
+      
       this.localStream.getTracks().forEach(track => {
-        pc.addTrack(track, this.localStream);
+        const sender = pc.addTrack(track, this.localStream);
+        console.log('Track added to peer connection:', track.kind, 'sender:', sender);
       });
+    } else {
+      console.warn('No local stream available when creating peer connection');
     }
 
     pc.onicecandidate = (event) => {
@@ -115,6 +125,16 @@ const ShuntCallWebRTC = {
       console.log('Track received from:', remotePeerId.slice(0, 16) + '...');
       const { track, streams } = event;
       
+      console.log('Track details:', {
+        kind: track.kind,
+        id: track.id,
+        label: track.label,
+        readyState: track.readyState,
+        enabled: track.enabled,
+        streams: streams.length,
+        streamId: streams[0]?.id
+      });
+      
       // Add track error listener
       track.onended = () => {
         console.log('Remote track ended:', track.kind, remotePeerId.slice(0, 16));
@@ -134,6 +154,14 @@ const ShuntCallWebRTC = {
           error
         });
       };
+      
+      // Emit trackReceived event immediately
+      this.emit('trackReceived', {
+        peerId: remotePeerId,
+        track,
+        stream: streams[0],
+        kind: track.kind
+      });
       
       // Emit both remoteStream and track events for flexibility
       this.emit('remoteStream', {
@@ -172,8 +200,13 @@ const ShuntCallWebRTC = {
     return pc;
   },
 
-  async handleOffer(fromPeerId, sdp, eventId) {
+   async handleOffer(fromPeerId, sdp, eventId) {
     console.log('Processing offer from:', fromPeerId.slice(0, 16) + '...');
+    console.log('Offer details:', {
+      hasVideo: sdp.sdp.includes('m=video'),
+      hasAudio: sdp.sdp.includes('m=audio'),
+      sdpSize: sdp.sdp.length
+    });
 
     let pc = this.peerConnections[fromPeerId];
     if (!pc) {
@@ -185,13 +218,28 @@ const ShuntCallWebRTC = {
 
     this.processPendingIceCandidates(fromPeerId);
 
-    const answer = await pc.createAnswer();
-    await pc.setLocalDescription(answer);
+    const answer = await pc.createAnswer({
+      offerToReceiveAudio: true,
+      offerToReceiveVideo: true
+    });
+    
+    console.log('Answer created:', {
+      type: answer.type,
+      hasVideo: answer.sdp.includes('m=video'),
+      hasAudio: answer.sdp.includes('m=audio'),
+      sdpSize: answer.sdp.length
+    });
+    
+    // Log SDP details for debugging
+    console.log('Original answer SDP:', answer.sdp.substring(0, 200) + '...');
+
+    const optimizedAnswer = this.optimizeSDP(answer);
+    await pc.setLocalDescription(optimizedAnswer);
 
     await this.waitForIceGathering(pc);
 
     console.log('Sending answer to:', fromPeerId.slice(0, 16) + '...');
-    await this.signaling.sendAnswer(fromPeerId, answer, eventId);
+    await this.signaling.sendAnswer(fromPeerId, pc.localDescription, eventId);
   },
 
   async handleAnswer(fromPeerId, sdp) {
@@ -274,7 +322,7 @@ const ShuntCallWebRTC = {
     });
   },
 
-  async createOffer(remotePeerId) {
+   async createOffer(remotePeerId) {
     console.log('Creating offer for:', remotePeerId.slice(0, 16) + '...');
     
     let pc = this.peerConnections[remotePeerId];
@@ -282,26 +330,71 @@ const ShuntCallWebRTC = {
       pc = this.createPeerConnection(remotePeerId);
     }
     
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
+    const offer = await pc.createOffer({
+      offerToReceiveAudio: true,
+      offerToReceiveVideo: true
+    });
+    
+    console.log('Offer created:', {
+      type: offer.type,
+      sdpSize: offer.sdp.length,
+      hasVideo: offer.sdp.includes('m=video'),
+      hasAudio: offer.sdp.includes('m=audio')
+    });
+    
+    // Log SDP details for debugging
+    console.log('Original offer SDP:', offer.sdp.substring(0, 200) + '...');
+    
+    // Optimize SDP for better compatibility
+    const optimizedOffer = this.optimizeSDP(offer);
+    
+    await pc.setLocalDescription(optimizedOffer);
     
     await this.waitForIceGathering(pc);
     
     console.log('Sending offer to:', remotePeerId.slice(0, 16) + '...');
-    await this.signaling.sendOffer(remotePeerId, offer);
+    await this.signaling.sendOffer(remotePeerId, pc.localDescription);
     
-    return offer;
+    return pc.localDescription;
+  },
+
+  optimizeSDP(sessionDescription) {
+    let sdp = sessionDescription.sdp;
+    
+    // Prioritize VP8 and H.264 codecs for better compatibility
+    if (sdp.includes('VP8')) {
+      // Reorder codecs to prioritize VP8
+      sdp = sdp.replace(/(m=video.*?)(VP8.*?)(H264.*?)(\\r\\n)/s, '$1$2$3');
+    }
+    
+    // Ensure audio codecs are properly configured
+    if (sdp.includes('opus')) {
+      // Prioritize Opus codec
+      sdp = sdp.replace(/(m=audio.*?)(opus.*?)(PCMU.*?)(\\r\\n)/s, '$1$2$3');
+    }
+    
+    return new RTCSessionDescription({
+      type: sessionDescription.type,
+      sdp: sdp
+    });
   },
 
 
 
-  handleConnectionStateChange(pc) {
+   handleConnectionStateChange(pc) {
     console.log(`Peer ${pc.peerId?.slice(0, 16)} connection state:`, pc.connectionState);
     
     this.emit('connectionStateChange', {
       peerId: pc.peerId,
       state: pc.connectionState
     });
+    
+    if (pc.connectionState === 'connected') {
+      // Verify tracks are properly established when connection is complete
+      setTimeout(() => {
+        this.verifyTracks(pc.peerId);
+      }, 1000);
+    }
     
     if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
       this.attemptReconnect(pc);
@@ -372,6 +465,39 @@ const ShuntCallWebRTC = {
     } catch (recoveryError) {
       console.error('Track recovery failed:', recoveryError);
     }
+  },
+
+  async verifyTracks(peerId) {
+    const pc = this.peerConnections[peerId];
+    if (!pc) return;
+
+    const senders = pc.getSenders();
+    const receivers = pc.getReceivers();
+
+    console.log('Track verification for peer:', peerId.slice(0, 16));
+    console.log('Senders:', senders.map(s => ({
+      kind: s.track?.kind,
+      id: s.track?.id,
+      readyState: s.track?.readyState
+    })));
+    console.log('Receivers:', receivers.map(r => ({
+      kind: r.track?.kind,
+      id: r.track?.id,
+      readyState: r.track?.readyState
+    })));
+
+    // Check for inactive tracks
+    senders.forEach(sender => {
+      if (sender.track && sender.track.readyState !== 'live') {
+        console.warn('Sender track not live:', sender.track.kind, sender.track.readyState);
+      }
+    });
+
+    receivers.forEach(receiver => {
+      if (receiver.track && receiver.track.readyState !== 'live') {
+        console.warn('Receiver track not live:', receiver.track.kind, receiver.track.readyState);
+      }
+    });
   },
 
   async getStats(peerId) {

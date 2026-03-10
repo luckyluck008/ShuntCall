@@ -331,16 +331,37 @@
            this.webrtc = ShuntCallWebRTC;
            this.webrtc.init(this.localStream, ourPubkey, this.signaling);
 
-           // Setup WebRTC event handlers
-           this.webrtc.on('remoteStream', (data) => {
-             console.log('Remote stream from:', data.peerId.slice(0, 16) + '...');
-             this.addRemoteStream(data.peerId, data.stream);
-           });
+            // Setup WebRTC event handlers
+            this.webrtc.on('trackReceived', (data) => {
+              console.log('Track received:', {
+                peerId: data.peerId.slice(0, 8),
+                kind: data.kind,
+                trackId: data.track.id,
+                streamId: data.stream.id
+              });
+              this.addDebugMessage(`TRACK_RECEIVED: ${data.kind} from ${data.peerId.slice(0, 8)}...`);
+              
+              // Handle track by creating or updating stream
+              if (!this.peers.has(data.peerId)) {
+                this.addRemoteStream(data.peerId, data.stream);
+              }
+            });
 
-           this.webrtc.on('connectionStateChange', (data) => {
-             console.log('Connection state:', data.peerId?.slice(0, 16), data.state);
-             this.updatePeerStatus(data.peerId, data.state);
-           });
+            this.webrtc.on('trackError', (data) => {
+              console.error('Track error:', data);
+              this.addDebugMessage(`TRACK_ERROR: ${data.kind} from ${data.peerId.slice(0, 8)} - ${data.error}`);
+            });
+
+            this.webrtc.on('trackEnded', (data) => {
+              console.log('Track ended:', data);
+              this.addDebugMessage(`TRACK_ENDED: ${data.kind} from ${data.peerId.slice(0, 8)}`);
+            });
+
+            this.webrtc.on('connectionStateChange', (data) => {
+              console.log('Connection state:', data.peerId?.slice(0, 16), data.state);
+              this.updatePeerStatus(data.peerId, data.state);
+              this.addDebugMessage(`CONNECTION_STATE: ${data.peerId?.slice(0, 8)} - ${data.state}`);
+            });
 
             // Broadcast our presence
             console.log('Broadcasting presence...');
@@ -556,20 +577,65 @@
          }, 5000);
        },
 
-      addRemoteStream(peerId, stream) {
-        if (this.peers.has(peerId)) return;
-        
-        const grid = document.getElementById('videoGrid');
-        
-        const container = document.createElement('div');
-        container.className = 'relative bg-neutral-900 border border-neutral-800 aspect-video group overflow-hidden rounded-sm';
-        container.id = `container-${peerId}`;
+       addRemoteStream(peerId, stream) {
+         if (this.peers.has(peerId)) {
+           const existingPeer = this.peers.get(peerId);
+           if (existingPeer.stream !== stream) {
+             console.log('Updating existing peer stream');
+             existingPeer.stream = stream;
+             const video = existingPeer.container.querySelector('video');
+             if (video) {
+               video.srcObject = stream;
+             }
+           }
+           return;
+         }
+         
+         console.log('Adding remote stream:', {
+           peerId: peerId.slice(0, 8),
+           streamId: stream.id,
+           tracks: stream.getTracks().map(t => ({
+             kind: t.kind,
+             id: t.id,
+             readyState: t.readyState,
+             enabled: t.enabled
+           })),
+           active: stream.active
+         });
+         
+         const grid = document.getElementById('videoGrid');
+         
+         const container = document.createElement('div');
+         container.className = 'relative bg-neutral-900 border border-neutral-800 aspect-video group overflow-hidden rounded-sm';
+         container.id = `container-${peerId}`;
 
-        const video = document.createElement('video');
-        video.autoplay = true;
-        video.playsInline = true;
-        video.srcObject = stream;
-        video.className = 'w-full h-full object-cover';
+         const video = document.createElement('video');
+         video.autoplay = true;
+         video.playsInline = true;
+         video.srcObject = stream;
+         video.className = 'w-full h-full object-cover';
+         
+         // Add video element error handling
+         video.onerror = (e) => {
+           console.error('Video element error:', e);
+           this.showError('Video playback error', 'Failed to display remote video');
+         };
+         
+         video.onloadedmetadata = () => {
+           console.log('Video metadata loaded:', {
+             width: video.videoWidth,
+             height: video.videoHeight,
+             duration: video.duration
+           });
+         };
+         
+         video.onwaiting = () => {
+           console.log('Video waiting for data');
+         };
+         
+         video.onplaying = () => {
+           console.log('Video is playing');
+         };
 
         const overlay = document.createElement('div');
         overlay.className = 'absolute inset-x-0 bottom-0 p-4 video-overlay flex justify-between items-end opacity-0 group-hover:opacity-100 transition-opacity duration-300';
@@ -623,10 +689,20 @@
         }
       },
 
-      updatePeerCount() {
-        const count = this.peers.size + 1;
-        document.getElementById('peerCount').textContent = `${count} Node${count !== 1 ? 's' : ''}`;
-      },
+       addDebugMessage(message) {
+         const debugContent = document.getElementById('debugContent');
+         const timestamp = new Date().toISOString().split('T')[1].split('.')[0];
+         const div = document.createElement('div');
+         div.className = 'debug-entry';
+         div.textContent = `[${timestamp}] ${message}`;
+         debugContent.appendChild(div);
+         debugContent.scrollTop = debugContent.scrollHeight;
+       },
+
+       updatePeerCount() {
+         const count = this.peers.size + 1;
+         document.getElementById('peerCount').textContent = `${count} Node${count !== 1 ? 's' : ''}`;
+       },
 
       setupEventListeners() {
         document.getElementById('toggleMic').addEventListener('click', (e) => {
