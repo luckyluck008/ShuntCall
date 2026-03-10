@@ -3,102 +3,202 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ShuntCall - Raum</title>
-  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
-  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@300;400;500&display=swap" rel="stylesheet">
-</head>
-<body class="bg-gray-900 text-white">
+  <title>ShuntCall - Protocol Room</title>
   
-  <!-- Password Modal -->
-  <div id="passwordModal" class="fixed inset-0 bg-black/90 flex items-center justify-center z-50">
-    <div class="bg-gray-900 p-6 max-w-sm w-full border border-green-400">
-      <h2 class="text-lg text-green-400 mb-4 text-center">[RAUM BEITRETEN]</h2>
-      <p class="text-green-600 text-sm mb-4 text-center">Passwort eingeben:</p>
-      <input type="password" id="roomPassword" class="bg-black border border-green-400 text-green-400 font-mono w-full px-3 py-2 mb-4 placeholder-green-700 focus:border-green-600 focus:outline-none focus:ring focus:ring-green-400/50" placeholder="Passwort">
-      <button id="submitPassword" class="bg-black border border-green-400 text-green-400 font-mono uppercase w-full py-2 hover:bg-green-900/20 hover:border-green-600 transform hover:scale-105 transition-all">
-        BEITRETEN
-      </button>
-      <p id="passwordError" class="text-red-400 mt-2 text-sm hidden text-center"></p>
-    </div>
-  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 
-  <!-- Loading Screen -->
-  <div id="loadingScreen" class="min-h-screen flex items-center justify-center p-4 hidden">
-    <div class="text-center">
-      <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-500 mx-auto mb-4"></div>
-      <p class="text-gray-400" id="loadingText">Verbindung wird hergestellt...</p>
-    </div>
-  </div>
-
-  <!-- Main Room -->
-  <div id="room" class="hidden">
+  <style>
+    /* Custom Design Elements matching index.html */
+    :root {
+      color-scheme: dark;
+    }
+    body {
+      font-family: 'Space Grotesk', sans-serif;
+      background-color: #050505;
+      color: #e5e5e5;
+    }
+    .font-mono {
+      font-family: 'JetBrains Mono', monospace;
+    }
     
-    <!-- Header -->
-    <header class="fixed top-0 left-0 right-0 z-50 bg-black p-4 border-b border-green-600">
-      <div class="flex justify-between items-center">
-        <div>
-          <h1 class="text-lg text-green-400">ShuntCall</h1>
-          <p class="text-sm text-green-600">Raum: <span id="roomIdDisplay" class="text-green-500"></span></p>
-        </div>
+    /* P2P Network Grid Background */
+    .bg-grid {
+      background-size: 32px 32px;
+      background-image: 
+        linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+    }
+
+    /* Minimalist technical inputs */
+    .tech-input {
+      background: rgba(10, 10, 10, 0.8);
+      border: 1px solid #262626;
+      transition: all 0.2s ease;
+    }
+    .tech-input:focus {
+      border-color: #ffffff;
+      outline: none;
+      box-shadow: 0 0 15px rgba(255, 255, 255, 0.1);
+    }
+
+    /* Solid & Outline buttons */
+    .btn-solid {
+      background: #ffffff;
+      color: #000000;
+      border: 1px solid #ffffff;
+      transition: all 0.2s ease;
+    }
+    .btn-solid:hover {
+      background: #e5e5e5;
+      transform: translateY(-1px);
+    }
+    .btn-outline {
+      background: transparent;
+      color: #ffffff;
+      border: 1px solid #333333;
+      transition: all 0.2s ease;
+    }
+    .btn-outline:hover {
+      border-color: #ffffff;
+      background: rgba(255, 255, 255, 0.05);
+    }
+
+    /* Video Container specific */
+    .video-overlay {
+      background: linear-gradient(to top, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0) 100%);
+    }
+    
+    /* Active states for toolbar */
+    .toolbar-btn {
+      transition: all 0.2s ease;
+    }
+    .toolbar-btn.active {
+      background: #ffffff;
+      color: #000000;
+      border-color: #ffffff;
+    }
+  </style>
+</head>
+<body class="bg-grid selection:bg-white selection:text-black h-screen overflow-hidden flex flex-col relative">
+  
+  <div id="passwordModal" class="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-[100] hidden">
+    <div class="bg-black border border-neutral-800 p-8 max-w-sm w-full relative group">
+      <div class="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-white/20 to-transparent"></div>
+      
+      <div class="flex items-center gap-3 mb-6">
+        <span class="font-mono text-xs text-neutral-500 border border-neutral-800 px-2 py-1">AUTH</span>
+        <h2 class="text-xl font-medium text-white">Join Channel</h2>
+      </div>
+      
+      <label class="block font-mono text-xs text-neutral-400 uppercase mb-2">Decryption Key required</label>
+      <input type="password" id="roomPassword" class="tech-input font-mono w-full px-4 py-3 text-sm text-white placeholder-neutral-600 rounded-sm mb-6" placeholder="••••••••••••">
+      
+      <button id="submitPassword" class="btn-solid w-full py-4 text-sm font-semibold uppercase tracking-wider rounded-sm">
+        Authenticate
+      </button>
+      <div id="passwordError" class="hidden mt-4 p-3 border border-red-900 bg-red-950/30 text-red-400 font-mono text-xs rounded-sm"></div>
+    </div>
+  </div>
+
+  <div id="loadingScreen" class="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm hidden">
+    <div class="text-center flex flex-col items-center">
+      <div class="w-12 h-12 relative mb-6">
+        <div class="absolute inset-0 border-2 border-neutral-800 border-t-white rounded-full animate-spin"></div>
+      </div>
+      <p class="font-mono text-xs text-neutral-400 animate-pulse tracking-widest uppercase" id="loadingText">Establishing Connection...</p>
+    </div>
+  </div>
+
+  <div id="room" class="hidden flex-1 flex flex-col h-full w-full">
+    
+    <header class="absolute top-0 left-0 right-0 z-40 bg-gradient-to-b from-black/90 to-transparent p-6">
+      <div class="max-w-[1600px] mx-auto flex justify-between items-start">
         <div class="flex items-center gap-4">
-          <span id="peerCount" class="text-sm text-green-500">0 Teilnehmer</span>
-          <button id="toggleDebug" class="px-2 py-1 bg-black border border-green-600 text-green-400 text-xs">Debug (D)</button>
+          <div>
+            <h1 class="text-lg font-semibold tracking-tight text-white mb-1">ShuntCall</h1>
+            <div class="flex items-center gap-2 font-mono text-xs">
+              <span class="text-neutral-500">ID:</span>
+              <span id="roomIdDisplay" class="text-white bg-white/10 px-2 py-0.5 rounded-sm"></span>
+            </div>
+          </div>
+        </div>
+        <div class="flex items-center gap-4 font-mono text-xs">
+          <div class="flex items-center gap-2 bg-black/50 border border-neutral-800 px-3 py-1.5 rounded-sm backdrop-blur-md">
+            <div class="w-1.5 h-1.5 bg-white rounded-full animate-pulse"></div>
+            <span id="peerCount" class="text-neutral-300">0 Peers</span>
+          </div>
+          <button id="toggleDebug" class="btn-outline px-3 py-1.5 rounded-sm text-neutral-400 hover:text-white">SYS.DBG</button>
         </div>
       </div>
     </header>
 
-    <!-- Video Grid -->
-    <div class="grid grid-cols-[repeat(auto-fit,minmax(320px,1fr))] gap-6 p-8 pt-20 pb-24 max-w-7xl mx-auto" id="videoGrid">
-      <!-- Local Video -->
-      <div class="relative bg-black border-2 border-cyan-400 aspect-video hover:scale-105 hover:-translate-y-1 transition-all duration-300" id="localContainer">
-        <video id="localVideo" autoplay muted playsinline class="w-full h-full object-cover rounded-2xl"></video>
-        <div class="absolute bottom-0 left-0 right-0 p-2 bg-black/80 flex justify-between items-center z-10">
-          <span class="text-sm text-green-400 font-mono">Du</span>
-          <div class="flex items-center gap-2">
-            <span class="w-2 h-2 rounded-full bg-green-400"></span>
+    <div class="flex-1 overflow-y-auto p-6 pt-24 pb-32">
+      <div class="max-w-[1600px] mx-auto h-full flex flex-col justify-center">
+        <div class="grid grid-cols-[repeat(auto-fit,minmax(320px,1fr))] gap-4 auto-rows-fr" id="videoGrid">
+          
+          <div class="relative bg-neutral-900 border border-neutral-800 aspect-video group overflow-hidden rounded-sm" id="localContainer">
+            <video id="localVideo" autoplay muted playsinline class="w-full h-full object-cover"></video>
+            
+            <div class="absolute inset-x-0 bottom-0 p-4 video-overlay flex justify-between items-end opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+              <div class="font-mono">
+                <span class="text-[10px] text-neutral-500 block mb-1">LOCAL_NODE</span>
+                <span class="text-sm text-white">You</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="text-[10px] text-neutral-500 font-mono">TX/RX OK</span>
+                <span class="w-2 h-2 rounded-full bg-white shadow-[0_0_8px_rgba(255,255,255,0.8)]"></span>
+              </div>
+            </div>
           </div>
+          
         </div>
       </div>
     </div>
 
-    <!-- Toolbar -->
-    <div class="fixed bottom-4 left-1/2 transform -translate-x-1/2 flex gap-2 p-2 bg-gray-900 border border-green-400 z-50 rounded-xl">
-      <button id="toggleMic" class="w-12 h-12 flex items-center justify-center bg-black border border-green-400 text-green-400 hover:bg-green-900/20 hover:border-green-600 transition-all" title="Mikrofon">
-        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path>
-        </svg>
-      </button>
-      <button id="toggleCamera" class="w-12 h-12 flex items-center justify-center bg-black border border-green-400 text-green-400 hover:bg-green-900/20 hover:border-green-600 transition-all" title="Kamera">
-        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
-        </svg>
-      </button>
-      <button id="toggleScreen" class="w-12 h-12 flex items-center justify-center bg-black border border-green-400 text-green-400 hover:bg-green-900/20 hover:border-green-600 transition-all" title="Bildschirm teilen">
-        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
-        </svg>
-      </button>
-      <button id="togglePiP" class="w-12 h-12 flex items-center justify-center bg-black border border-green-400 text-green-400 hover:bg-green-900/20 hover:border-green-600 transition-all" title="Bild-in-Bild">
-        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path>
-        </svg>
-      </button>
-      <button id="leaveRoom" class="w-12 h-12 flex items-center justify-center bg-black border border-red-400 text-red-400 hover:bg-red-900/20 hover:border-red-600 transition-all" title="Verlassen">
-        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 8l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2M5 3a2 2 0 00-2 2v1c0 8.284 6.716 15 15 15h1a2 2 0 002-2v-3.28a1 1 0 00-.684-.948l-4.493-1.498a1 1 0 00-1.21.502l-1.13 2.257a11.042 11.042 0 01-5.516-5.517l2.257-1.128a1 1 0 00.502-1.21L9.228 3.683A1 1 0 008.279 3H5z"></path>
-        </svg>
-      </button>
+    <div class="fixed bottom-8 left-1/2 transform -translate-x-1/2 z-50">
+      <div class="flex gap-2 p-2 bg-black/80 border border-neutral-800 backdrop-blur-xl rounded-sm shadow-2xl">
+        <button id="toggleMic" class="toolbar-btn active w-14 h-14 flex items-center justify-center bg-transparent border border-transparent text-white hover:bg-neutral-800 rounded-sm" title="Toggle Microphone">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path>
+          </svg>
+        </button>
+        <button id="toggleCamera" class="toolbar-btn active w-14 h-14 flex items-center justify-center bg-transparent border border-transparent text-white hover:bg-neutral-800 rounded-sm" title="Toggle Camera">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
+          </svg>
+        </button>
+        <div class="w-px h-8 bg-neutral-800 self-center mx-2"></div>
+        <button id="toggleScreen" class="w-14 h-14 flex items-center justify-center bg-transparent border border-transparent text-white hover:bg-neutral-800 transition-colors rounded-sm" title="Share Screen">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
+          </svg>
+        </button>
+        <button id="togglePiP" class="w-14 h-14 flex items-center justify-center bg-transparent border border-transparent text-white hover:bg-neutral-800 transition-colors rounded-sm" title="Picture-in-Picture">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path>
+          </svg>
+        </button>
+        <div class="w-px h-8 bg-neutral-800 self-center mx-2"></div>
+        <button id="leaveRoom" class="w-14 h-14 flex items-center justify-center bg-transparent border border-transparent text-red-500 hover:bg-red-950/50 hover:text-red-400 transition-colors rounded-sm" title="Disconnect">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M16 8l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2M5 3a2 2 0 00-2 2v1c0 8.284 6.716 15 15 15h1a2 2 0 002-2v-3.28a1 1 0 00-.684-.948l-4.493-1.498a1 1 0 00-1.21.502l-1.13 2.257a11.042 11.042 0 01-5.516-5.517l2.257-1.128a1 1 0 00.502-1.21L9.228 3.683A1 1 0 008.279 3H5z"></path>
+          </svg>
+        </button>
+      </div>
     </div>
 
-    <!-- Debug Panel -->
-    <div id="debugPanel" class="fixed bottom-24 right-6 bg-gray-900/95 backdrop-blur-xl p-6 rounded-2xl text-xs font-mono hidden max-w-md border border-white/10 shadow-2xl">
-      <div class="flex items-center gap-2 mb-4">
-        <svg class="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <div id="debugPanel" class="fixed bottom-28 right-6 bg-black/95 backdrop-blur-xl p-6 rounded-sm text-xs font-mono hidden max-w-md border border-neutral-800 shadow-2xl z-50">
+      <div class="flex items-center gap-2 mb-4 border-b border-neutral-800 pb-3">
+        <svg class="w-4 h-4 text-neutral-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
         </svg>
-        <h3 class="font-bold text-white">Debug Info</h3>
+        <h3 class="font-medium text-white uppercase tracking-wider">System Log</h3>
       </div>
-      <div id="debugContent" class="text-gray-300 space-y-1"></div>
+      <div id="debugContent" class="text-neutral-400 space-y-2 max-h-64 overflow-y-auto pr-2 custom-scrollbar"></div>
     </div>
   </div>
 
@@ -113,7 +213,7 @@
     (function() {
       const isSecure = window.location.protocol === 'https:' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
       if (!isSecure) {
-        document.write('<div style="background:#ef4444;color:white;padding:1rem;text-align:center;font-weight:bold;">⚠️ HTTPS erforderlich!</div>');
+        document.write('<div style="background:#000;border-bottom:1px solid #ef4444;color:#ef4444;padding:1rem;text-align:center;font-family:monospace;font-size:12px;text-transform:uppercase;z-index:9999;position:relative;">[System Alert] HTTPS required for secure media transmission.</div>');
       }
     })();
 
@@ -143,7 +243,7 @@
       },
 
       setupPasswordModal() {
-        // Check if password is in sessionStorage (when creator joins their own room)
+        // Check if password is in sessionStorage
         const storedPassword = sessionStorage.getItem('shuntcall_password');
         const storedRoomId = sessionStorage.getItem('shuntcall_roomId');
         
@@ -155,16 +255,15 @@
           this.password = storedPassword;
           sessionStorage.removeItem('shuntcall_roomId');
           sessionStorage.removeItem('shuntcall_password');
-          // Hide modal first, then init
           document.getElementById('passwordModal').style.display = 'none';
           this.initRoom();
           return;
         }
 
-        // Show the modal if no stored password
+        // Show the modal
         document.getElementById('passwordModal').style.display = 'flex';
+        document.getElementById('passwordModal').classList.remove('hidden');
         
-        const modal = document.getElementById('passwordModal');
         const input = document.getElementById('roomPassword');
         const submit = document.getElementById('submitPassword');
         const error = document.getElementById('passwordError');
@@ -172,7 +271,7 @@
         submit.addEventListener('click', async () => {
           const password = input.value.trim();
           if (!password) {
-            error.textContent = 'Bitte gib ein Passwort ein';
+            error.textContent = 'Decryption key is required.';
             error.classList.remove('hidden');
             return;
           }
@@ -191,10 +290,10 @@
 
       async initRoom() {
         document.getElementById('passwordModal').classList.add('hidden');
-        this.showLoading('Verbinde zu Nostr...');
+        this.showLoading('Initializing Nostr Protocol...');
 
         try {
-          // Compute room tag from roomId + password
+          // Compute room tag
           this.roomTag = await this.computeRoomTag(this.roomId, this.password);
           console.log('Room tag:', this.roomTag);
 
@@ -207,7 +306,7 @@
           await this.signaling.init(this.roomId, this.password);
           console.log('Signaling initialized');
 
-          // Get our pubkey after initialization
+          // Get our pubkey
           const ourPubkey = this.signaling.nostr.keys.publicKey;
           console.log('Our pubkey:', ourPubkey.slice(0, 16) + '...');
 
@@ -226,9 +325,7 @@
             this.updatePeerStatus(data.peerId, data.state);
           });
 
-
-
-           // Broadcast our presence so existing peers can connect to us
+           // Broadcast our presence
            console.log('Broadcasting presence...');
            await this.signaling.broadcastPresence();
 
@@ -240,7 +337,7 @@
 
         } catch (error) {
           console.error('Init error:', error);
-          alert('Verbindung fehlgeschlagen: ' + error.message);
+          alert('Connection failed: ' + error.message);
           window.location.href = 'index.html';
         }
       },
@@ -264,14 +361,14 @@
         const isSecure = window.location.protocol === 'https:' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
         
         if (!isSecure) {
-          alert('Kamera-Zugriff erfordert HTTPS oder localhost!');
+          alert('System requires HTTPS or localhost for media access.');
           return;
         }
 
         // Show media permission prompt
         this.showMediaPermissionModal();
         
-        // Wait for user to confirm media access
+        // Wait for user to confirm
         await new Promise((resolve, reject) => {
           this.mediaPermissionResolve = resolve;
           this.mediaPermissionReject = reject;
@@ -289,38 +386,44 @@
           console.log('Media initialized');
         } catch (error) {
           console.error('Media error:', error);
-          alert('Kamera/Mikrofon Fehler: ' + error.message);
+          alert('Hardware access denied or unavailable: ' + error.message);
           throw error;
         }
       },
 
       showMediaPermissionModal() {
-        // Create media permission modal
+        // Create styled media permission modal
         const modal = document.createElement('div');
-        modal.className = 'password-modal';
+        modal.className = 'fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-[110]';
         modal.id = 'mediaPermissionModal';
         modal.innerHTML = `
-          <div class="bg-gray-900 p-8 rounded-2xl max-w-md w-full border border-green-400">
-            <h2 class="text-2xl font-bold mb-4 text-green-400">Medienzugriff</h2>
-            <p class="text-green-500 mb-6">Bitte wähle, welche Medien du teilen möchtest:</p>
+          <div class="bg-black border border-neutral-800 p-8 max-w-sm w-full relative">
+            <div class="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-white/20 to-transparent"></div>
+            
+            <div class="flex items-center gap-3 mb-6">
+              <span class="font-mono text-xs text-neutral-500 border border-neutral-800 px-2 py-1">SYS.HW</span>
+              <h2 class="text-xl font-medium text-white">Hardware Access</h2>
+            </div>
+            
+            <p class="text-neutral-400 text-sm mb-6">Configure transmission parameters:</p>
 
-            <div class="space-y-4 mb-6">
-              <label class="flex items-center gap-3">
-                <input type="checkbox" id="enableVideo" checked class="w-4 h-4 text-green-400 rounded border border-green-400 bg-black">
-                <span class="text-green-400">Kamera</span>
+            <div class="space-y-4 mb-8 font-mono text-sm">
+              <label class="flex items-center gap-4 cursor-pointer group">
+                <input type="checkbox" id="enableVideo" checked class="w-4 h-4 accent-white bg-black border-neutral-600">
+                <span class="text-neutral-300 group-hover:text-white transition-colors">Video Transmission</span>
               </label>
-              <label class="flex items-center gap-3">
-                <input type="checkbox" id="enableAudio" checked class="w-4 h-4 text-green-400 rounded border border-green-400 bg-black">
-                <span class="text-green-400">Mikrofon</span>
+              <label class="flex items-center gap-4 cursor-pointer group">
+                <input type="checkbox" id="enableAudio" checked class="w-4 h-4 accent-white bg-black border-neutral-600">
+                <span class="text-neutral-300 group-hover:text-white transition-colors">Audio Transmission</span>
               </label>
             </div>
 
             <div class="flex gap-3">
-              <button id="mediaPermissionAccept" class="flex-1 bg-black border border-green-400 text-green-400 font-mono uppercase hover:bg-green-900/20 hover:border-green-600 py-3 rounded-lg font-semibold transform hover:scale-105 transition-all">
-                Akzeptieren
+              <button id="mediaPermissionAccept" class="btn-solid flex-1 py-3 text-xs font-semibold uppercase tracking-wider rounded-sm">
+                Authorize
               </button>
-              <button id="mediaPermissionDecline" class="flex-1 bg-gray-700 border border-gray-500 text-gray-400 hover:bg-gray-600 py-3 rounded-lg font-semibold">
-                Ablehnen
+              <button id="mediaPermissionDecline" class="btn-outline flex-1 py-3 text-xs font-semibold uppercase tracking-wider rounded-sm text-neutral-400">
+                Deny
               </button>
             </div>
           </div>
@@ -328,13 +431,11 @@
         
         document.body.appendChild(modal);
         
-        // Set default media options
         this.mediaOptions = {
           video: true,
           audio: true
         };
         
-        // Add event listeners
         document.getElementById('enableVideo').addEventListener('change', (e) => {
           this.mediaOptions.video = e.target.checked;
         });
@@ -350,7 +451,7 @@
         
         document.getElementById('mediaPermissionDecline').addEventListener('click', () => {
           modal.remove();
-          this.mediaPermissionReject(new Error('Medienzugriff abgelehnt'));
+          this.mediaPermissionReject(new Error('Hardware access denied by user.'));
         });
       },
 
@@ -360,28 +461,31 @@
         const grid = document.getElementById('videoGrid');
         
         const container = document.createElement('div');
-        container.className = 'relative bg-black border border-green-400 aspect-video hover:scale-105 hover:-translate-y-1 transition-all duration-300';
+        container.className = 'relative bg-neutral-900 border border-neutral-800 aspect-video group overflow-hidden rounded-sm';
         container.id = `container-${peerId}`;
 
         const video = document.createElement('video');
         video.autoplay = true;
         video.playsInline = true;
         video.srcObject = stream;
-        video.className = 'w-full h-full object-cover rounded-2xl';
+        video.className = 'w-full h-full object-cover';
 
         const overlay = document.createElement('div');
-        overlay.className = 'absolute bottom-0 left-0 right-0 p-2 bg-black/80 flex justify-between items-center z-10';
+        overlay.className = 'absolute inset-x-0 bottom-0 p-4 video-overlay flex justify-between items-end opacity-0 group-hover:opacity-100 transition-opacity duration-300';
 
         overlay.innerHTML = `
-          <span class="text-sm text-green-400 font-mono">${peerId.slice(0, 8)}...</span>
+          <div class="font-mono">
+            <span class="text-[10px] text-neutral-500 block mb-1">REMOTE_NODE</span>
+            <span class="text-sm text-white">${peerId.slice(0, 8)}...</span>
+          </div>
           <div class="flex items-center gap-2">
-            <span class="w-2 h-2 rounded-full bg-green-400" id="status-${peerId}"></span>
+            <span class="text-[10px] text-neutral-500 font-mono">RX</span>
+            <span class="w-2 h-2 rounded-full bg-neutral-600 transition-colors duration-300" id="status-${peerId}"></span>
           </div>
         `;
 
         container.appendChild(video);
         container.appendChild(overlay);
-        container.classList.add('animate-fade-in-scale');
         grid.appendChild(container);
         
         this.peers.set(peerId, { stream, container });
@@ -405,37 +509,53 @@
       updatePeerStatus(peerId, state) {
         const statusEl = document.getElementById(`status-${peerId}`);
         if (statusEl) {
-          statusEl.className = 'status-indicator';
+          // Reset classes
+          statusEl.className = 'w-2 h-2 rounded-full transition-all duration-300';
+          
           if (state === 'connected') {
-            statusEl.classList.add('status-connected');
+            statusEl.classList.add('bg-white', 'shadow-[0_0_8px_rgba(255,255,255,0.8)]');
           } else if (state === 'connecting' || state === 'new') {
-            statusEl.classList.add('status-connecting');
+            statusEl.classList.add('bg-neutral-500', 'animate-pulse');
           } else {
-            statusEl.classList.add('status-disconnected');
+            statusEl.classList.add('bg-red-500');
           }
         }
       },
 
       updatePeerCount() {
         const count = this.peers.size + 1;
-        document.getElementById('peerCount').textContent = `${count} Teilnehmer`;
+        document.getElementById('peerCount').textContent = `${count} Node${count !== 1 ? 's' : ''}`;
       },
 
       setupEventListeners() {
-        document.getElementById('toggleMic').addEventListener('click', () => {
+        document.getElementById('toggleMic').addEventListener('click', (e) => {
           this.isAudioEnabled = !this.isAudioEnabled;
           this.localStream.getAudioTracks().forEach(track => {
             track.enabled = this.isAudioEnabled;
           });
-          document.getElementById('toggleMic').classList.toggle('active', this.isAudioEnabled);
+          const btn = e.currentTarget;
+          if(this.isAudioEnabled) {
+            btn.classList.add('active', 'bg-white', 'text-black');
+            btn.classList.remove('bg-transparent', 'text-white');
+          } else {
+            btn.classList.remove('active', 'bg-white', 'text-black');
+            btn.classList.add('bg-transparent', 'text-white');
+          }
         });
 
-        document.getElementById('toggleCamera').addEventListener('click', () => {
+        document.getElementById('toggleCamera').addEventListener('click', (e) => {
           this.isVideoEnabled = !this.isVideoEnabled;
           this.localStream.getVideoTracks().forEach(track => {
             track.enabled = this.isVideoEnabled;
           });
-          document.getElementById('toggleCamera').classList.toggle('active', this.isVideoEnabled);
+          const btn = e.currentTarget;
+          if(this.isVideoEnabled) {
+            btn.classList.add('active', 'bg-white', 'text-black');
+            btn.classList.remove('bg-transparent', 'text-white');
+          } else {
+            btn.classList.remove('active', 'bg-white', 'text-black');
+            btn.classList.add('bg-transparent', 'text-white');
+          }
         });
 
         document.getElementById('toggleScreen').addEventListener('click', async () => {
@@ -453,11 +573,14 @@
             const localVideo = document.getElementById('localVideo');
             localVideo.srcObject = this.localStream;
             
+            document.getElementById('toggleScreen').classList.add('bg-white', 'text-black');
+            
             screenTrack.onended = async () => {
               const newStream = await navigator.mediaDevices.getUserMedia({ video: true });
               const newVideoTrack = newStream.getVideoTracks()[0];
               this.localStream.addTrack(newVideoTrack);
               localVideo.srcObject = this.localStream;
+              document.getElementById('toggleScreen').classList.remove('bg-white', 'text-black');
             };
           } catch (error) {
             console.error('Screen share error:', error);
@@ -473,8 +596,10 @@
             }
             if (document.pictureInPictureElement) {
               await document.exitPictureInPicture();
+              document.getElementById('togglePiP').classList.remove('bg-white', 'text-black');
             } else if (localVideo.requestPictureInPicture) {
               await localVideo.requestPictureInPicture();
+              document.getElementById('togglePiP').classList.add('bg-white', 'text-black');
             }
           } catch (error) {
             console.error('PiP error:', error);
