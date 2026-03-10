@@ -288,59 +288,86 @@
         });
       },
 
-      async initRoom() {
-        document.getElementById('passwordModal').classList.add('hidden');
-        this.showLoading('Initializing Nostr Protocol...');
+       async initRoom() {
+         document.getElementById('passwordModal').classList.add('hidden');
+         this.showLoading('Initializing Nostr Protocol...');
 
-        try {
-          // Compute room tag
-          this.roomTag = await this.computeRoomTag(this.roomId, this.password);
-          console.log('Room tag:', this.roomTag);
+         try {
+           // Compute room tag
+           this.roomTag = await this.computeRoomTag(this.roomId, this.password);
+           console.log('Room tag:', this.roomTag);
 
-          // Initialize media
-          await this.initMedia();
+           // Initialize media with retry logic
+           let mediaInitialized = false;
+           let mediaRetryCount = 0;
+           const maxMediaRetries = 2;
 
-           // Initialize Nostr signaling
-          this.signaling = NostrSignaling;
-          console.log('Initializing signaling...');
-          await this.signaling.init(this.roomId, this.password);
-          console.log('Signaling initialized');
+           while (!mediaInitialized && mediaRetryCount < maxMediaRetries) {
+             try {
+               await this.initMedia();
+               mediaInitialized = true;
+             } catch (mediaError) {
+               mediaRetryCount++;
+               console.warn(`Media initialization attempt ${mediaRetryCount} failed:`, mediaError);
+               if (mediaRetryCount >= maxMediaRetries) {
+                 throw mediaError;
+               }
+               // Wait 1 second before retrying
+               await new Promise(resolve => setTimeout(resolve, 1000));
+             }
+           }
 
-          // Get our pubkey
-          const ourPubkey = this.signaling.nostr.keys.publicKey;
-          console.log('Our pubkey:', ourPubkey.slice(0, 16) + '...');
+            // Initialize Nostr signaling
+           this.signaling = NostrSignaling;
+           console.log('Initializing signaling...');
+           await this.signaling.init(this.roomId, this.password);
+           console.log('Signaling initialized');
 
-          // Initialize WebRTC
-          this.webrtc = ShuntCallWebRTC;
-          this.webrtc.init(this.localStream, ourPubkey, this.signaling);
+           // Get our pubkey
+           const ourPubkey = this.signaling.nostr.keys.publicKey;
+           console.log('Our pubkey:', ourPubkey.slice(0, 16) + '...');
 
-          // Setup WebRTC event handlers
-          this.webrtc.on('remoteStream', (data) => {
-            console.log('Remote stream from:', data.peerId.slice(0, 16) + '...');
-            this.addRemoteStream(data.peerId, data.stream);
-          });
+           // Initialize WebRTC
+           this.webrtc = ShuntCallWebRTC;
+           this.webrtc.init(this.localStream, ourPubkey, this.signaling);
 
-          this.webrtc.on('connectionStateChange', (data) => {
-            console.log('Connection state:', data.peerId?.slice(0, 16), data.state);
-            this.updatePeerStatus(data.peerId, data.state);
-          });
+           // Setup WebRTC event handlers
+           this.webrtc.on('remoteStream', (data) => {
+             console.log('Remote stream from:', data.peerId.slice(0, 16) + '...');
+             this.addRemoteStream(data.peerId, data.stream);
+           });
 
-           // Broadcast our presence
-           console.log('Broadcasting presence...');
-           await this.signaling.broadcastPresence();
+           this.webrtc.on('connectionStateChange', (data) => {
+             console.log('Connection state:', data.peerId?.slice(0, 16), data.state);
+             this.updatePeerStatus(data.peerId, data.state);
+           });
 
-          this.setupEventListeners();
-          this.updatePeerCount();
+            // Broadcast our presence
+            console.log('Broadcasting presence...');
+            await this.signaling.broadcastPresence();
 
-          document.getElementById('loadingScreen').classList.add('hidden');
-          document.getElementById('room').classList.remove('hidden');
+           this.setupEventListeners();
+           this.updatePeerCount();
 
-        } catch (error) {
-          console.error('Init error:', error);
-          alert('Connection failed: ' + error.message);
-          window.location.href = 'index.html';
-        }
-      },
+           document.getElementById('loadingScreen').classList.add('hidden');
+           document.getElementById('room').classList.remove('hidden');
+
+         } catch (error) {
+           console.error('Init error:', error);
+           this.showError('Connection failed', error.message);
+           // Add a retry button to the error modal
+           setTimeout(() => {
+             const errorOkBtn = document.getElementById('errorOk');
+             if (errorOkBtn) {
+               errorOkBtn.textContent = 'Retry';
+               errorOkBtn.onclick = () => {
+                 document.getElementById('errorModal').remove();
+                 this.initRoom();
+               };
+             }
+           }, 100);
+         }
+       },
 
       async computeRoomTag(roomId, password) {
         const input = roomId + ':' + password;
@@ -358,102 +385,176 @@
       },
 
        async initMedia() {
-        const isSecure = window.location.protocol === 'https:' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-        
-        if (!isSecure) {
-          alert('System requires HTTPS or localhost for media access.');
-          return;
-        }
+         const isSecure = window.location.protocol === 'https:' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+         
+         if (!isSecure) {
+           throw new Error('System requires HTTPS or localhost for media access.');
+         }
 
-        // Show media permission prompt
-        this.showMediaPermissionModal();
-        
-        // Wait for user to confirm
-        await new Promise((resolve, reject) => {
-          this.mediaPermissionResolve = resolve;
-          this.mediaPermissionReject = reject;
-        });
+         // Show media permission prompt
+         this.showMediaPermissionModal();
+         
+         // Wait for user to confirm
+         await new Promise((resolve, reject) => {
+           this.mediaPermissionResolve = resolve;
+           this.mediaPermissionReject = reject;
+         });
 
-        try {
-          this.localStream = await navigator.mediaDevices.getUserMedia({
-            video: this.mediaOptions.video,
-            audio: this.mediaOptions.audio
-          });
+         try {
+           // Validate that at least one media type is enabled
+           if (!this.mediaOptions.video && !this.mediaOptions.audio) {
+             throw new Error('At least one media type (audio or video) must be enabled.');
+           }
 
-          const localVideo = document.getElementById('localVideo');
-          localVideo.srcObject = this.localStream;
-          
-          console.log('Media initialized');
-        } catch (error) {
-          console.error('Media error:', error);
-          alert('Hardware access denied or unavailable: ' + error.message);
-          throw error;
-        }
-      },
+           this.localStream = await navigator.mediaDevices.getUserMedia({
+             video: this.mediaOptions.video ? {
+               width: { ideal: 1280 },
+               height: { ideal: 720 },
+               frameRate: { ideal: 30 }
+             } : false,
+             audio: this.mediaOptions.audio ? {
+               echoCancellation: true,
+               noiseSuppression: true,
+               autoGainControl: true
+             } : false
+           });
 
-      showMediaPermissionModal() {
-        // Create styled media permission modal
-        const modal = document.createElement('div');
-        modal.className = 'fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-[110]';
-        modal.id = 'mediaPermissionModal';
-        modal.innerHTML = `
-          <div class="bg-black border border-neutral-800 p-8 max-w-sm w-full relative">
-            <div class="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-white/20 to-transparent"></div>
-            
-            <div class="flex items-center gap-3 mb-6">
-              <span class="font-mono text-xs text-neutral-500 border border-neutral-800 px-2 py-1">SYS.HW</span>
-              <h2 class="text-xl font-medium text-white">Hardware Access</h2>
-            </div>
-            
-            <p class="text-neutral-400 text-sm mb-6">Configure transmission parameters:</p>
+           const localVideo = document.getElementById('localVideo');
+           localVideo.srcObject = this.localStream;
+           
+           console.log('Media initialized');
 
-            <div class="space-y-4 mb-8 font-mono text-sm">
-              <label class="flex items-center gap-4 cursor-pointer group">
-                <input type="checkbox" id="enableVideo" checked class="w-4 h-4 accent-white bg-black border-neutral-600">
-                <span class="text-neutral-300 group-hover:text-white transition-colors">Video Transmission</span>
-              </label>
-              <label class="flex items-center gap-4 cursor-pointer group">
-                <input type="checkbox" id="enableAudio" checked class="w-4 h-4 accent-white bg-black border-neutral-600">
-                <span class="text-neutral-300 group-hover:text-white transition-colors">Audio Transmission</span>
-              </label>
-            </div>
+           // Handle stream ended events
+           this.localStream.getTracks().forEach(track => {
+             track.onended = () => {
+               console.warn(`Media track ended: ${track.kind}`);
+               this.handleTrackEnded(track.kind);
+             };
+           });
 
-            <div class="flex gap-3">
-              <button id="mediaPermissionAccept" class="btn-solid flex-1 py-3 text-xs font-semibold uppercase tracking-wider rounded-sm">
-                Authorize
-              </button>
-              <button id="mediaPermissionDecline" class="btn-outline flex-1 py-3 text-xs font-semibold uppercase tracking-wider rounded-sm text-neutral-400">
-                Deny
-              </button>
-            </div>
-          </div>
-        `;
-        
-        document.body.appendChild(modal);
-        
-        this.mediaOptions = {
-          video: true,
-          audio: true
-        };
-        
-        document.getElementById('enableVideo').addEventListener('change', (e) => {
-          this.mediaOptions.video = e.target.checked;
-        });
-        
-        document.getElementById('enableAudio').addEventListener('change', (e) => {
-          this.mediaOptions.audio = e.target.checked;
-        });
-        
-        document.getElementById('mediaPermissionAccept').addEventListener('click', () => {
-          modal.remove();
-          this.mediaPermissionResolve();
-        });
-        
-        document.getElementById('mediaPermissionDecline').addEventListener('click', () => {
-          modal.remove();
-          this.mediaPermissionReject(new Error('Hardware access denied by user.'));
-        });
-      },
+         } catch (error) {
+           console.error('Media error:', error);
+           this.showError('Hardware access error', error.message);
+           throw error;
+         }
+       },
+
+       showMediaPermissionModal() {
+         // Create styled media permission modal
+         const modal = document.createElement('div');
+         modal.className = 'fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-[110]';
+         modal.id = 'mediaPermissionModal';
+         modal.innerHTML = `
+           <div class="bg-black border border-neutral-800 p-8 max-w-sm w-full relative">
+             <div class="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-white/20 to-transparent"></div>
+             
+             <div class="flex items-center gap-3 mb-6">
+               <span class="font-mono text-xs text-neutral-500 border border-neutral-800 px-2 py-1">SYS.HW</span>
+               <h2 class="text-xl font-medium text-white">Hardware Access</h2>
+             </div>
+             
+             <p class="text-neutral-400 text-sm mb-6">Configure transmission parameters:</p>
+
+             <div class="space-y-4 mb-8 font-mono text-sm">
+               <label class="flex items-center gap-4 cursor-pointer group">
+                 <input type="checkbox" id="enableVideo" checked class="w-4 h-4 accent-white bg-black border-neutral-600">
+                 <span class="text-neutral-300 group-hover:text-white transition-colors">Video Transmission</span>
+               </label>
+               <label class="flex items-center gap-4 cursor-pointer group">
+                 <input type="checkbox" id="enableAudio" checked class="w-4 h-4 accent-white bg-black border-neutral-600">
+                 <span class="text-neutral-300 group-hover:text-white transition-colors">Audio Transmission</span>
+               </label>
+             </div>
+
+             <div class="flex gap-3">
+               <button id="mediaPermissionAccept" class="btn-solid flex-1 py-3 text-xs font-semibold uppercase tracking-wider rounded-sm">
+                 Authorize
+               </button>
+               <button id="mediaPermissionDecline" class="btn-outline flex-1 py-3 text-xs font-semibold uppercase tracking-wider rounded-sm text-neutral-400">
+                 Deny
+               </button>
+             </div>
+           </div>
+         `;
+         
+         document.body.appendChild(modal);
+         
+         this.mediaOptions = {
+           video: true,
+           audio: true
+         };
+         
+         document.getElementById('enableVideo').addEventListener('change', (e) => {
+           this.mediaOptions.video = e.target.checked;
+         });
+         
+         document.getElementById('enableAudio').addEventListener('change', (e) => {
+           this.mediaOptions.audio = e.target.checked;
+         });
+         
+         document.getElementById('mediaPermissionAccept').addEventListener('click', () => {
+           modal.remove();
+           this.mediaPermissionResolve();
+         });
+         
+         document.getElementById('mediaPermissionDecline').addEventListener('click', () => {
+           modal.remove();
+           this.mediaPermissionReject(new Error('Hardware access denied by user.'));
+         });
+       },
+
+       showError(title, message) {
+         // Create error modal
+         const modal = document.createElement('div');
+         modal.className = 'fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-[110]';
+         modal.id = 'errorModal';
+         modal.innerHTML = `
+           <div class="bg-black border border-red-900/50 p-8 max-w-sm w-full relative">
+             <div class="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-red-500/30 to-transparent"></div>
+             
+             <div class="flex items-center gap-3 mb-6">
+               <span class="font-mono text-xs text-red-500 border border-red-900 px-2 py-1">ERROR</span>
+               <h2 class="text-xl font-medium text-white">${title}</h2>
+             </div>
+             
+             <p class="text-red-400 text-sm mb-6 font-mono">${message}</p>
+
+             <div class="flex gap-3">
+               <button id="errorOk" class="btn-solid flex-1 py-3 text-xs font-semibold uppercase tracking-wider rounded-sm">
+                 OK
+               </button>
+             </div>
+           </div>
+         `;
+         
+         document.body.appendChild(modal);
+         
+         document.getElementById('errorOk').addEventListener('click', () => {
+           modal.remove();
+         });
+       },
+
+       handleTrackEnded(kind) {
+         console.warn(`${kind} track ended unexpectedly`);
+         // Show warning to user
+         const modal = document.createElement('div');
+         modal.className = 'fixed top-6 right-6 bg-black/90 backdrop-blur-md border border-neutral-800 p-4 z-[110]';
+         modal.innerHTML = `
+           <div class="flex items-center gap-3">
+             <span class="font-mono text-xs text-yellow-500 border border-yellow-900 px-2 py-1">WARNING</span>
+             <p class="text-yellow-400 text-sm">${kind} track ended unexpectedly. Check your device.</p>
+           </div>
+         `;
+         
+         document.body.appendChild(modal);
+         
+         // Auto remove after 5 seconds
+         setTimeout(() => {
+           if (modal.parentNode) {
+             modal.remove();
+           }
+         }, 5000);
+       },
 
       addRemoteStream(peerId, stream) {
         if (this.peers.has(peerId)) return;
