@@ -6,95 +6,164 @@
   <title>ShuntCall - Raum</title>
   <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
   <style>
-    body { font-family: system-ui, -apple-system, sans-serif; }
-    .video-grid { 
-      display: grid; 
-      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); 
-      gap: 1rem;
-      padding: 1rem;
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: linear-gradient(135deg, #0c0a09 0%, #1c1917 50%, #292524 100%);
+      background-attachment: fixed;
+    }
+    .video-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 1.5rem;
+      padding: 2rem;
+      max-width: 1400px;
+      margin: 0 auto;
     }
     .video-container {
       position: relative;
-      background: #1a1a2e;
-      border-radius: 12px;
+      background: linear-gradient(135deg, #1f2937, #374151);
+      border-radius: 20px;
       overflow: hidden;
       aspect-ratio: 16/9;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+      border: 1px solid rgba(255,255,255,0.1);
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .video-container:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 20px 60px rgba(0,0,0,0.6);
     }
     .video-container video {
       width: 100%;
       height: 100%;
       object-fit: cover;
+      border-radius: 20px;
     }
     .video-container.local {
-      border: 2px solid #6366f1;
+      border: 3px solid #06b6d4;
+      box-shadow: 0 0 30px rgba(6,182,212,0.3);
     }
     .video-overlay {
       position: absolute;
       bottom: 0;
       left: 0;
       right: 0;
-      padding: 0.5rem;
-      background: linear-gradient(transparent, rgba(0,0,0,0.7));
+      padding: 1rem;
+      background: linear-gradient(transparent, rgba(0,0,0,0.8));
+      backdrop-filter: blur(10px);
       display: flex;
       justify-content: space-between;
       align-items: center;
     }
     .peer-name {
-      font-size: 0.875rem;
-      font-weight: 500;
-    }
-    .hop-badge {
-      font-size: 0.625rem;
-      padding: 0.125rem 0.375rem;
-      border-radius: 9999px;
-      background: rgba(99, 102, 241, 0.8);
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: white;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.5);
     }
     .status-indicator {
-      width: 8px;
-      height: 8px;
+      width: 12px;
+      height: 12px;
       border-radius: 50%;
+      border: 2px solid rgba(255,255,255,0.3);
+      box-shadow: 0 0 8px currentColor;
     }
-    .status-connected { background: #22c55e; }
-    .status-connecting { background: #eab308; }
-    .status-disconnected { background: #ef4444; }
+    .status-connected { background: #10b981; color: #10b981; }
+    .status-connecting { background: #f59e0b; color: #f59e0b; }
+    .status-disconnected { background: #ef4444; color: #ef4444; }
     .toolbar {
       position: fixed;
       bottom: 2rem;
       left: 50%;
       transform: translateX(-50%);
       display: flex;
-      gap: 0.75rem;
-      padding: 0.75rem;
-      background: rgba(0,0,0,0.8);
-      backdrop-filter: blur(10px);
-      border-radius: 9999px;
+      gap: 1rem;
+      padding: 1rem;
+      background: rgba(0,0,0,0.85);
+      backdrop-filter: blur(20px);
+      border-radius: 50px;
+      border: 1px solid rgba(255,255,255,0.1);
+      box-shadow: 0 8px 32px rgba(0,0,0,0.4);
       z-index: 100;
     }
     .toolbar-btn {
-      width: 3rem;
-      height: 3rem;
+      width: 3.5rem;
+      height: 3.5rem;
       border-radius: 50%;
       display: flex;
       align-items: center;
       justify-content: center;
-      transition: all 0.2s;
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      background: rgba(255,255,255,0.1);
+      border: 1px solid rgba(255,255,255,0.1);
+      color: white;
     }
-    .toolbar-btn:hover { transform: scale(1.1); }
-    .toolbar-btn.active { background: #6366f1; }
-    .toolbar-btn.danger { background: #ef4444; }
-    .toolbar-btn.danger:hover { background: #dc2626; }
+    .toolbar-btn:hover {
+      transform: scale(1.1);
+      background: rgba(255,255,255,0.15);
+      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+    }
+    .toolbar-btn.active {
+      background: linear-gradient(135deg, #06b6d4, #0891b2);
+      box-shadow: 0 0 20px rgba(6,182,212,0.4);
+    }
+    .toolbar-btn.danger {
+      background: linear-gradient(135deg, #ef4444, #dc2626);
+      color: white;
+    }
+    .toolbar-btn.danger:hover {
+      background: linear-gradient(135deg, #dc2626, #b91c1c);
+      box-shadow: 0 0 20px rgba(239,68,68,0.4);
+    }
     .password-modal {
       position: fixed;
       inset: 0;
-      background: rgba(0,0,0,0.9);
+      background: rgba(0,0,0,0.95);
+      backdrop-filter: blur(10px);
       display: flex;
       align-items: center;
       justify-content: center;
       z-index: 200;
     }
     .password-modal input {
-      background: rgba(255,255,255,0.1);
-      border: 1px solid rgba(255,255,255,0.3);
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 12px;
+      transition: all 0.3s;
+    }
+    .password-modal input:focus {
+      border-color: #06b6d4;
+      box-shadow: 0 0 0 3px rgba(6,182,212,0.1);
+    }
+
+    @keyframes slideInUp {
+      from {
+        opacity: 0;
+        transform: translateY(50px) scale(0.95);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+      }
+    }
+
+    @keyframes fadeInScale {
+      from {
+        opacity: 0;
+        transform: scale(0.9);
+      }
+      to {
+        opacity: 1;
+        transform: scale(1);
+      }
+    }
+
+    .animate-slide-in-up {
+      animation: slideInUp 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .animate-fade-in-scale {
+      animation: fadeInScale 0.4s cubic-bezier(0.4, 0, 0.2, 1);
     }
   </style>
 </head>
@@ -102,14 +171,21 @@
   
   <!-- Password Modal -->
   <div id="passwordModal" class="password-modal">
-    <div class="bg-gray-800 p-8 rounded-2xl max-w-md w-full">
-      <h2 class="text-2xl font-bold mb-4">Raum beitreten</h2>
-      <p class="text-gray-400 mb-6">Gib das Passwort ein, um dem Raum beizutreten.</p>
-      <input type="password" id="roomPassword" class="w-full px-4 py-3 rounded-lg mb-4" placeholder="Passwort">
-      <button id="submitPassword" class="w-full bg-indigo-600 hover:bg-indigo-700 py-3 rounded-lg font-semibold">
+    <div class="bg-gray-900/95 backdrop-blur-xl p-10 rounded-3xl max-w-md w-full border border-white/10 shadow-2xl">
+      <div class="text-center mb-8">
+        <div class="w-16 h-16 rounded-2xl bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center mx-auto mb-4">
+          <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
+          </svg>
+        </div>
+        <h2 class="text-3xl font-bold text-white mb-2">Raum beitreten</h2>
+        <p class="text-gray-300">Gib das Passwort ein, um dem Raum beizutreten.</p>
+      </div>
+      <input type="password" id="roomPassword" class="w-full px-5 py-4 rounded-xl mb-6 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-cyan-400/50 transition-all duration-200" placeholder="Passwort">
+      <button id="submitPassword" class="w-full bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-600 hover:to-blue-700 py-4 rounded-xl font-bold text-lg shadow-lg hover:shadow-xl transition-all duration-200">
         Beitreten
       </button>
-      <p id="passwordError" class="text-red-400 mt-3 text-sm hidden"></p>
+      <p id="passwordError" class="text-red-400 mt-4 text-sm hidden text-center"></p>
     </div>
   </div>
 
@@ -125,15 +201,27 @@
   <div id="room" class="hidden">
     
     <!-- Header -->
-    <header class="fixed top-0 left-0 right-0 z-50 bg-gray-900/80 backdrop-blur-sm p-4">
-      <div class="flex justify-between items-center">
-        <div>
-          <h1 class="text-xl font-bold">ShuntCall</h1>
-          <p class="text-sm text-gray-400">Raum: <span id="roomIdDisplay"></span></p>
-        </div>
+    <header class="fixed top-0 left-0 right-0 z-50 bg-black/40 backdrop-blur-xl p-6 border-b border-white/10">
+      <div class="flex justify-between items-center max-w-7xl mx-auto">
         <div class="flex items-center gap-4">
-          <span id="peerCount" class="text-sm text-gray-400">0 Teilnehmer</span>
-          <button id="toggleDebug" class="px-3 py-1 bg-gray-700 rounded text-sm">Debug (D)</button>
+          <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center">
+            <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
+            </svg>
+          </div>
+          <div>
+            <h1 class="text-2xl font-bold bg-gradient-to-r from-cyan-300 to-blue-300 bg-clip-text text-transparent">ShuntCall</h1>
+            <p class="text-sm text-gray-300">Raum: <span id="roomIdDisplay" class="font-mono font-medium"></span></p>
+          </div>
+        </div>
+        <div class="flex items-center gap-6">
+          <div class="flex items-center gap-2 px-4 py-2 bg-white/5 rounded-full backdrop-blur-sm">
+            <svg class="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path>
+            </svg>
+            <span id="peerCount" class="text-sm font-medium text-white">0 Teilnehmer</span>
+          </div>
+          <button id="toggleDebug" class="px-4 py-2 bg-gray-700/50 hover:bg-gray-600/50 rounded-xl text-sm font-medium transition-colors duration-200 backdrop-blur-sm">Debug (D)</button>
         </div>
       </div>
     </header>
@@ -154,37 +242,42 @@
 
     <!-- Toolbar -->
     <div class="toolbar">
-      <button id="toggleMic" class="toolbar-btn bg-gray-700" title="Mikrofon">
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <button id="toggleMic" class="toolbar-btn" title="Mikrofon">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path>
         </svg>
       </button>
-      <button id="toggleCamera" class="toolbar-btn bg-gray-700" title="Kamera">
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <button id="toggleCamera" class="toolbar-btn" title="Kamera">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
         </svg>
       </button>
-      <button id="toggleScreen" class="toolbar-btn bg-gray-700" title="Bildschirm teilen">
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <button id="toggleScreen" class="toolbar-btn" title="Bildschirm teilen">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
         </svg>
       </button>
-      <button id="togglePiP" class="toolbar-btn bg-gray-700" title="Bild-in-Bild">
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16"></path>
+      <button id="togglePiP" class="toolbar-btn" title="Bild-in-Bild">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path>
         </svg>
       </button>
       <button id="leaveRoom" class="toolbar-btn danger" title="Verlassen">
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 8l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2M5 3a2 2 0 00-2 2v1c0 8.284 6.716 15 15 15h1a2 2 0 002-2v-3.28a1 1 0 00-.684-.948l-4.493-1.498a1 1 0 00-1.21.502l-1.13 2.257a11.042 11.042 0 01-5.516-5.517l2.257-1.128a1 1 0 00.502-1.21L9.228 3.683A1 1 0 008.279 3H5z"></path>
         </svg>
       </button>
     </div>
 
     <!-- Debug Panel -->
-    <div id="debugPanel" class="fixed bottom-24 right-4 bg-gray-800/90 backdrop-blur p-4 rounded-lg text-xs font-mono hidden max-w-sm">
-      <h3 class="font-bold mb-2">Debug Info</h3>
-      <div id="debugContent"></div>
+    <div id="debugPanel" class="fixed bottom-24 right-6 bg-gray-900/95 backdrop-blur-xl p-6 rounded-2xl text-xs font-mono hidden max-w-md border border-white/10 shadow-2xl">
+      <div class="flex items-center gap-2 mb-4">
+        <svg class="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+        </svg>
+        <h3 class="font-bold text-white">Debug Info</h3>
+      </div>
+      <div id="debugContent" class="text-gray-300 space-y-1"></div>
     </div>
   </div>
 
@@ -456,16 +549,17 @@
         
         const overlay = document.createElement('div');
         overlay.className = 'video-overlay';
-        
+
         overlay.innerHTML = `
           <span class="peer-name">${peerId.slice(0, 8)}...</span>
           <div class="flex items-center gap-2">
             <span class="status-indicator status-connected" id="status-${peerId}"></span>
           </div>
         `;
-        
+
         container.appendChild(video);
         container.appendChild(overlay);
+        container.classList.add('animate-fade-in-scale');
         grid.appendChild(container);
         
         this.peers.set(peerId, { stream, container });
