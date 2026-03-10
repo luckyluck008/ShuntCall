@@ -6,203 +6,19 @@
   <title>ShuntCall - Raum</title>
   <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
   <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@300;400;500&display=swap" rel="stylesheet">
-  <style>
-    body {
-      font-family: 'Fira Code', monospace;
-      color: #00ff00;
-      background-color: #000000;
-    }
-    @keyframes matrixRain {
-      0% { transform: translateY(-100%); }
-      100% { transform: translateY(100%); }
-    }
-    .video-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-      gap: 1.5rem;
-      padding: 2rem;
-      max-width: 1400px;
-      margin: 0 auto;
-    }
-    .video-container {
-      position: relative;
-      background-color: #000000;
-      border: 1px solid #00ff00;
-      aspect-ratio: 16/9;
-    }
-    .video-container.local {
-      border-color: #00aa00;
-    }
-    .video-container::before {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      background: linear-gradient(45deg, transparent, rgba(255, 0, 255, 0.1), transparent);
-      animation: hologram 4s linear infinite;
-      z-index: 1;
-      pointer-events: none;
-    }
-    .video-container:hover {
-      transform: translateY(-4px) scale(1.02);
-      box-shadow: 0 0 60px rgba(0, 255, 255, 0.6), inset 0 0 60px rgba(0, 255, 255, 0.2);
-    }
-    .video-container video {
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-      border-radius: 20px;
-    }
-    .video-container.local {
-      border: 3px solid #00ffff;
-      box-shadow: 0 0 50px rgba(0, 255, 255, 0.5), inset 0 0 50px rgba(0, 255, 255, 0.2);
-      animation: localGlow 2s ease-in-out infinite alternate;
-    }
-
-    .video-overlay {
-      position: absolute;
-      bottom: 0;
-      left: 0;
-      right: 0;
-      padding: 0.5rem;
-      background-color: rgba(0, 0, 0, 0.8);
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      z-index: 2;
-    }
-    .peer-name {
-      font-size: 0.875rem;
-      color: #00ff00;
-      font-family: 'Fira Code', monospace;
-    }
-    .status-indicator {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-    }
-    .status-connected { background: #00ff00; }
-    .status-connecting { background: #ffff00; }
-    .status-disconnected { background: #ff0000; }
-    @keyframes statusPulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.6; }
-    }
-    .toolbar {
-      position: fixed;
-      bottom: 1rem;
-      left: 50%;
-      transform: translateX(-50%);
-      display: flex;
-      gap: 0.5rem;
-      padding: 0.5rem;
-      background-color: #111111;
-      border: 1px solid #00ff00;
-      z-index: 100;
-    }
-    .toolbar-btn {
-      width: 3rem;
-      height: 3rem;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background-color: #000000;
-      border: 1px solid #00ff00;
-      color: #00ff00;
-    }
-    .toolbar-btn:hover {
-      background-color: #001100;
-      border-color: #00aa00;
-    }
-    .toolbar-btn.active {
-      background-color: #002200;
-    }
-    .toolbar-btn.danger {
-      border-color: #ff0000;
-      color: #ff0000;
-    }
-    .toolbar-btn.danger:hover {
-      background-color: #110000;
-    }
-    @keyframes activePulse {
-      0%, 100% { box-shadow: 0 0 30px rgba(0, 255, 255, 0.6); }
-      50% { box-shadow: 0 0 50px rgba(255, 0, 255, 0.8); }
-    }
-    .password-modal {
-      position: fixed;
-      inset: 0;
-      background-color: rgba(0, 0, 0, 0.9);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      z-index: 200;
-    }
-    .password-modal input {
-      background-color: #000000;
-      border: 1px solid #00ff00;
-      color: #00ff00;
-      font-family: 'Fira Code', monospace;
-    }
-    .password-modal input:focus {
-      border-color: #00aa00;
-      outline: none;
-    }
-
-    @keyframes slideInUp {
-      from {
-        opacity: 0;
-        transform: translateY(50px) scale(0.95);
-      }
-      to {
-        opacity: 1;
-        transform: translateY(0) scale(1);
-      }
-    }
-
-    @keyframes fadeInScale {
-      from {
-        opacity: 0;
-        transform: scale(0.9);
-      }
-      to {
-        opacity: 1;
-        transform: scale(1);
-      }
-    }
-
-    .animate-slide-in-up {
-      animation: slideInUp 0.5s cubic-bezier(0.4, 0, 0.2, 1);
-    }
-
-    .animate-fade-in-scale {
-      animation: fadeInScale 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-    }
-  </style>
 </head>
 <body class="bg-gray-900 text-white">
   
   <!-- Password Modal -->
-  <div id="passwordModal" class="password-modal">
-    <div class="bg-black p-6 max-w-sm w-full border border-green-600">
+  <div id="passwordModal" class="fixed inset-0 bg-black/90 flex items-center justify-center z-50">
+    <div class="bg-gray-900 p-6 max-w-sm w-full border border-green-400">
       <h2 class="text-lg text-green-400 mb-4 text-center">[RAUM BEITRETEN]</h2>
       <p class="text-green-600 text-sm mb-4 text-center">Passwort eingeben:</p>
-      <input type="password" id="roomPassword" class="w-full px-3 py-2 mb-4 text-green-400 placeholder-green-700" placeholder="Passwort">
-      <button id="submitPassword" class="w-full bg-black border border-green-600 text-green-400 py-2 hover:bg-green-900">
+      <input type="password" id="roomPassword" class="bg-black border border-green-400 text-green-400 font-mono w-full px-3 py-2 mb-4 placeholder-green-700 focus:border-green-600 focus:outline-none focus:ring focus:ring-green-400/50" placeholder="Passwort">
+      <button id="submitPassword" class="bg-black border border-green-400 text-green-400 font-mono uppercase w-full py-2 hover:bg-green-900/20 hover:border-green-600 transform hover:scale-105 transition-all">
         BEITRETEN
       </button>
       <p id="passwordError" class="text-red-400 mt-2 text-sm hidden text-center"></p>
-    </div>
-  </div>
-        <h2 class="text-3xl font-normal text-transparent bg-clip-text bg-gradient-to-r from-amber-300 to-yellow-400 mb-2" style="font-family: 'Didot', serif;">Raum beitreten</h2>
-        <p class="text-slate-300" style="font-family: 'Crimson Text', serif;">Gib das Passwort ein, um dem Raum beizutreten.</p>
-      </div>
-      <input type="password" id="roomPassword" class="w-full px-5 py-4 mb-6 text-white placeholder-slate-400 focus:outline-none transition-all duration-300" style="font-family: 'Crimson Text', serif;" placeholder="Passwort">
-      <button id="submitPassword" class="w-full bg-gradient-to-r from-amber-400 to-yellow-500 hover:from-amber-500 hover:to-yellow-600 py-4 font-semibold text-lg shadow-lg hover:shadow-xl transition-all duration-300" style="font-family: 'Didot', serif; clip-path: polygon(10% 0%, 90% 0%, 100% 10%, 100% 90%, 90% 100%, 10% 100%, 0% 90%, 0% 10%);">
-        Beitreten
-      </button>
-      <p id="passwordError" class="text-red-400 mt-4 text-sm hidden text-center" style="font-family: 'Crimson Text', serif;"></p>
     </div>
   </div>
 
@@ -232,42 +48,42 @@
     </header>
 
     <!-- Video Grid -->
-    <div class="video-grid pt-20 pb-24" id="videoGrid">
+    <div class="grid grid-cols-[repeat(auto-fit,minmax(320px,1fr))] gap-6 p-8 pt-20 pb-24 max-w-7xl mx-auto" id="videoGrid">
       <!-- Local Video -->
-      <div class="video-container local" id="localContainer">
-        <video id="localVideo" autoplay muted playsinline></video>
-        <div class="video-overlay">
-          <span class="peer-name">Du</span>
+      <div class="relative bg-black border-2 border-cyan-400 aspect-video hover:scale-105 hover:-translate-y-1 transition-all duration-300" id="localContainer">
+        <video id="localVideo" autoplay muted playsinline class="w-full h-full object-cover rounded-2xl"></video>
+        <div class="absolute bottom-0 left-0 right-0 p-2 bg-black/80 flex justify-between items-center z-10">
+          <span class="text-sm text-green-400 font-mono">Du</span>
           <div class="flex items-center gap-2">
-            <span class="status-indicator status-connected"></span>
+            <span class="w-2 h-2 rounded-full bg-green-400"></span>
           </div>
         </div>
       </div>
     </div>
 
     <!-- Toolbar -->
-    <div class="toolbar">
-      <button id="toggleMic" class="toolbar-btn" title="Mikrofon">
+    <div class="fixed bottom-4 left-1/2 transform -translate-x-1/2 flex gap-2 p-2 bg-gray-900 border border-green-400 z-50 rounded-xl">
+      <button id="toggleMic" class="w-12 h-12 flex items-center justify-center bg-black border border-green-400 text-green-400 hover:bg-green-900/20 hover:border-green-600 transition-all" title="Mikrofon">
         <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path>
         </svg>
       </button>
-      <button id="toggleCamera" class="toolbar-btn" title="Kamera">
+      <button id="toggleCamera" class="w-12 h-12 flex items-center justify-center bg-black border border-green-400 text-green-400 hover:bg-green-900/20 hover:border-green-600 transition-all" title="Kamera">
         <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
         </svg>
       </button>
-      <button id="toggleScreen" class="toolbar-btn" title="Bildschirm teilen">
+      <button id="toggleScreen" class="w-12 h-12 flex items-center justify-center bg-black border border-green-400 text-green-400 hover:bg-green-900/20 hover:border-green-600 transition-all" title="Bildschirm teilen">
         <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
         </svg>
       </button>
-      <button id="togglePiP" class="toolbar-btn" title="Bild-in-Bild">
+      <button id="togglePiP" class="w-12 h-12 flex items-center justify-center bg-black border border-green-400 text-green-400 hover:bg-green-900/20 hover:border-green-600 transition-all" title="Bild-in-Bild">
         <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path>
         </svg>
       </button>
-      <button id="leaveRoom" class="toolbar-btn danger" title="Verlassen">
+      <button id="leaveRoom" class="w-12 h-12 flex items-center justify-center bg-black border border-red-400 text-red-400 hover:bg-red-900/20 hover:border-red-600 transition-all" title="Verlassen">
         <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 8l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2M5 3a2 2 0 00-2 2v1c0 8.284 6.716 15 15 15h1a2 2 0 002-2v-3.28a1 1 0 00-.684-.948l-4.493-1.498a1 1 0 00-1.21.502l-1.13 2.257a11.042 11.042 0 01-5.516-5.517l2.257-1.128a1 1 0 00.502-1.21L9.228 3.683A1 1 0 008.279 3H5z"></path>
         </svg>
@@ -484,26 +300,26 @@
         modal.className = 'password-modal';
         modal.id = 'mediaPermissionModal';
         modal.innerHTML = `
-          <div class="bg-gray-800 p-8 rounded-2xl max-w-md w-full">
-            <h2 class="text-2xl font-bold mb-4">Medienzugriff</h2>
-            <p class="text-gray-400 mb-6">Bitte wähle, welche Medien du teilen möchtest:</p>
-            
+          <div class="bg-gray-900 p-8 rounded-2xl max-w-md w-full border border-green-400">
+            <h2 class="text-2xl font-bold mb-4 text-green-400">Medienzugriff</h2>
+            <p class="text-green-500 mb-6">Bitte wähle, welche Medien du teilen möchtest:</p>
+
             <div class="space-y-4 mb-6">
               <label class="flex items-center gap-3">
-                <input type="checkbox" id="enableVideo" checked class="w-4 h-4 text-indigo-600 rounded">
-                <span>Kamera</span>
+                <input type="checkbox" id="enableVideo" checked class="w-4 h-4 text-green-400 rounded border border-green-400 bg-black">
+                <span class="text-green-400">Kamera</span>
               </label>
               <label class="flex items-center gap-3">
-                <input type="checkbox" id="enableAudio" checked class="w-4 h-4 text-indigo-600 rounded">
-                <span>Mikrofon</span>
+                <input type="checkbox" id="enableAudio" checked class="w-4 h-4 text-green-400 rounded border border-green-400 bg-black">
+                <span class="text-green-400">Mikrofon</span>
               </label>
             </div>
-            
+
             <div class="flex gap-3">
-              <button id="mediaPermissionAccept" class="flex-1 bg-indigo-600 hover:bg-indigo-700 py-3 rounded-lg font-semibold">
+              <button id="mediaPermissionAccept" class="flex-1 bg-black border border-green-400 text-green-400 font-mono uppercase hover:bg-green-900/20 hover:border-green-600 py-3 rounded-lg font-semibold transform hover:scale-105 transition-all">
                 Akzeptieren
               </button>
-              <button id="mediaPermissionDecline" class="flex-1 bg-gray-600 hover:bg-gray-700 py-3 rounded-lg font-semibold">
+              <button id="mediaPermissionDecline" class="flex-1 bg-gray-700 border border-gray-500 text-gray-400 hover:bg-gray-600 py-3 rounded-lg font-semibold">
                 Ablehnen
               </button>
             </div>
@@ -544,21 +360,22 @@
         const grid = document.getElementById('videoGrid');
         
         const container = document.createElement('div');
-        container.className = 'video-container';
+        container.className = 'relative bg-black border border-green-400 aspect-video hover:scale-105 hover:-translate-y-1 transition-all duration-300';
         container.id = `container-${peerId}`;
-        
+
         const video = document.createElement('video');
         video.autoplay = true;
         video.playsInline = true;
         video.srcObject = stream;
-        
+        video.className = 'w-full h-full object-cover rounded-2xl';
+
         const overlay = document.createElement('div');
-        overlay.className = 'video-overlay';
+        overlay.className = 'absolute bottom-0 left-0 right-0 p-2 bg-black/80 flex justify-between items-center z-10';
 
         overlay.innerHTML = `
-          <span class="peer-name">${peerId.slice(0, 8)}...</span>
+          <span class="text-sm text-green-400 font-mono">${peerId.slice(0, 8)}...</span>
           <div class="flex items-center gap-2">
-            <span class="status-indicator status-connected" id="status-${peerId}"></span>
+            <span class="w-2 h-2 rounded-full bg-green-400" id="status-${peerId}"></span>
           </div>
         `;
 

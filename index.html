@@ -11,123 +11,8 @@
   <script src="js/nostr.js"></script>
   <script src="js/nostr-signaling.js"></script>
   <script src="js/webrtc.js"></script>
-  <style>
-    body {
-      font-family: 'Fira Code', monospace;
-      color: #00ff00;
-      background-color: #000000;
-    }
-    .gradient-bg {
-      background-color: #000000;
-      background-attachment: fixed;
-    }
-    .gradient-bg::before {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      background-image:
-        radial-gradient(circle at 25% 25%, rgba(0, 255, 255, 0.05) 0%, transparent 25%),
-        radial-gradient(circle at 75% 75%, rgba(255, 0, 255, 0.05) 0%, transparent 25%);
-      animation: flicker 4s infinite alternate;
-    }
-    @keyframes flicker {
-      0% { opacity: 0.8; }
-      100% { opacity: 1; }
-    }
-    .card {
-      background-color: #111111;
-      border: 1px solid #00ff00;
-      box-shadow: inset 0 0 10px rgba(0, 255, 0, 0.1);
-    }
-    @keyframes borderGlow {
-      0%, 100% { transform: translateX(-100%); }
-      50% { transform: translateX(100%); }
-    }
-    .input-field {
-      background-color: #000000;
-      border: 1px solid #00ff00;
-      color: #00ff00;
-      font-family: 'Fira Code', monospace;
-    }
-    .input-field:focus {
-      border-color: #00aa00;
-      outline: none;
-    }
-    .btn-primary {
-      background-color: #000000;
-      border: 1px solid #00ff00;
-      color: #00ff00;
-      font-family: 'Fira Code', monospace;
-      text-transform: uppercase;
-    }
-    .btn-primary:hover {
-      background-color: #001100;
-      border-color: #00aa00;
-    }
-    .btn-primary:hover {
-      transform: translateY(-2px) scale(1.05);
-      box-shadow: 0 0 40px rgba(0, 255, 255, 0.8), 0 0 80px rgba(255, 0, 255, 0.3);
-      animation: neonPulse 1s infinite;
-    }
-    @keyframes neonPulse {
-      0%, 100% { box-shadow: 0 0 40px rgba(0, 255, 255, 0.8), 0 0 80px rgba(255, 0, 255, 0.3); }
-      50% { box-shadow: 0 0 60px rgba(0, 255, 255, 1), 0 0 120px rgba(255, 0, 255, 0.5); }
-    }
-    @keyframes glitch {
-      0% { transform: translate(0); }
-      20% { transform: translate(-2px, 2px); }
-      40% { transform: translate(-2px, -2px); }
-      60% { transform: translate(2px, 2px); }
-      80% { transform: translate(2px, -2px); }
-      100% { transform: translate(0); }
-    }
-    .btn-secondary {
-      background: rgba(255,255,255,0.05);
-      border: 1px solid rgba(255,255,255,0.1);
-      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-      box-shadow: 0 2px 10px rgba(0,0,0,0.2);
-    }
-    .btn-secondary:hover {
-      background: rgba(255,255,255,0.1);
-      transform: translateY(-1px);
-      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
-    }
-
-    @keyframes fadeInUp {
-      from {
-        opacity: 0;
-        transform: translateY(30px);
-      }
-      to {
-        opacity: 1;
-        transform: translateY(0);
-      }
-    }
-
-    @keyframes pulse-glow {
-      0%, 100% {
-        box-shadow: 0 0 20px rgba(6,182,212,0.3);
-      }
-      50% {
-        box-shadow: 0 0 30px rgba(6,182,212,0.6);
-      }
-    }
-
-    .animate-fade-in-up {
-      animation: fadeInUp 0.6s cubic-bezier(0.4, 0, 0.2, 1);
-    }
-
-    .animate-pulse-glow {
-      animation: pulse-glow 2s infinite;
-    }
-
-
-  </style>
 </head>
-<body class="gradient-bg min-h-screen text-white">
+<body class="font-mono text-green-400 bg-black min-h-screen relative">
   <div id="app" class="min-h-screen flex flex-col items-center justify-center p-4">
     
     <!-- Header -->
@@ -138,14 +23,14 @@
         </h1>
         <p class="text-green-600 text-sm">P2P Video Chat</p>
       </div>
-      <p class="text-gray-300 text-xl font-light tracking-wide">Sichere P2P Videokonferenz ohne Server</p>
+      <p class="text-green-500 text-xl font-light tracking-wide">Sichere P2P Videokonferenz ohne Server</p>
     </div>
 
     <!-- Main Cards Container -->
     <div class="flex flex-col md:flex-row gap-8 w-full max-w-4xl">
       
       <!-- Create Room Card -->
-      <div class="card p-10 flex-1 hover:scale-[1.01] transition-all duration-500 group animate-fade-in-up" style="animation-delay: 0.1s">
+      <div class="bg-gray-900 border border-green-400 shadow-inner shadow-green-400/10 p-10 flex-1 hover:scale-105 transition-all duration-300 group">
         <h2 class="text-xl font-normal text-green-400 mb-4 border-b border-green-600 pb-2">
           [RAUM ERSTELLEN]
         </h2>
@@ -156,8 +41,8 @@
           <div>
             <label class="block text-sm text-green-500 mb-1">Raum-ID:</label>
             <div class="flex gap-3">
-              <input type="text" id="createRoomId" class="input-field flex-1 px-5 py-4 rounded-xl text-white placeholder-gray-400 focus:ring-2 focus:ring-cyan-400/50" placeholder="mein-raum">
-              <button type="button" id="generateId" class="btn-secondary px-4 py-4 rounded-xl hover:bg-cyan-500/10" title="Zufällige ID generieren">
+              <input type="text" id="createRoomId" class="bg-black border border-green-400 text-green-400 font-mono flex-1 px-5 py-4 rounded-xl placeholder-green-700 focus:border-green-600 focus:outline-none focus:ring focus:ring-green-400/50" placeholder="mein-raum">
+              <button type="button" id="generateId" class="bg-white/5 border border-white/10 px-4 py-4 rounded-xl transition-all hover:bg-white/10 hover:shadow-lg transform hover:-translate-y-0.5" title="Zufällige ID generieren">
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
                 </svg>
@@ -167,10 +52,10 @@
 
           <div>
             <label class="block text-sm text-green-500 mb-1">Passwort:</label>
-            <input type="password" id="createPassword" class="input-field w-full px-5 py-4 rounded-xl text-white placeholder-gray-400 focus:ring-2 focus:ring-cyan-400/50" placeholder="Sicheres Passwort">
+            <input type="password" id="createPassword" class="bg-black border border-green-400 text-green-400 font-mono w-full px-5 py-4 rounded-xl placeholder-green-700 focus:border-green-600 focus:outline-none focus:ring focus:ring-green-400/50" placeholder="Sicheres Passwort">
           </div>
 
-          <button type="submit" class="btn-primary w-full py-4 rounded-xl font-bold text-lg shadow-lg">
+          <button type="submit" class="bg-black border border-green-400 text-green-400 font-mono uppercase w-full py-4 rounded-xl font-bold text-lg shadow-lg hover:bg-green-900/20 hover:border-green-600 transform hover:scale-105 transition-all">
             Raum erstellen
           </button>
         </form>
@@ -183,7 +68,7 @@
       </div>
 
       <!-- Join Room Card -->
-      <div class="card p-10 flex-1 hover:scale-[1.01] transition-all duration-500 group animate-fade-in-up" style="animation-delay: 0.2s">
+      <div class="bg-gray-900 border border-green-400 shadow-inner shadow-green-400/10 p-10 flex-1 hover:scale-105 transition-all duration-300 group">
         <h2 class="text-xl font-normal text-green-400 mb-4 border-b border-green-600 pb-2">
           [RAUM BEITRETEN]
         </h2>
@@ -191,10 +76,10 @@
         <form id="joinForm" class="space-y-6">
           <div>
             <label class="block text-sm text-green-500 mb-1">Einladungslink:</label>
-            <input type="text" id="joinLink" class="input-field w-full px-5 py-4 rounded-xl text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-400/50" placeholder="https://...">
+            <input type="text" id="joinLink" class="bg-black border border-green-400 text-green-400 font-mono w-full px-5 py-4 rounded-xl placeholder-green-700 focus:border-green-600 focus:outline-none focus:ring focus:ring-green-400/50" placeholder="https://...">
           </div>
 
-          <button type="submit" class="btn-secondary w-full py-4 rounded-xl font-bold text-lg hover:bg-blue-500/10">
+          <button type="submit" class="bg-white/5 border border-white/10 w-full py-4 rounded-xl font-bold text-lg transition-all hover:bg-white/10 hover:shadow-lg transform hover:-translate-y-0.5">
             Raum beitreten
           </button>
         </form>
@@ -330,7 +215,7 @@
         
         // Show "Enter Room" button instead of auto-redirect
         const enterBtn = document.createElement('button');
-        enterBtn.className = 'btn-full py-primary w-3 rounded-lg font-semibold mt-4';
+        enterBtn.className = 'bg-black border border-green-400 text-green-400 font-mono uppercase w-full py-4 rounded-lg font-semibold mt-4 hover:bg-green-900/20 hover:border-green-600 transform hover:scale-105 transition-all';
         enterBtn.textContent = 'Jetzt beitreten';
         enterBtn.onclick = () => {
           window.location.href = shareLink;
@@ -351,7 +236,7 @@
         
         // Add enter button
         const enterBtn = document.createElement('button');
-        enterBtn.className = 'btn-primary w-full py-2 rounded-lg font-semibold mt-4';
+        enterBtn.className = 'bg-black border border-green-400 text-green-400 font-mono uppercase w-full py-4 rounded-lg font-semibold mt-4 hover:bg-green-900/20 hover:border-green-600 transform hover:scale-105 transition-all';
         enterBtn.textContent = 'Trotzdem beitreten';
         enterBtn.onclick = () => {
           sessionStorage.setItem('shuntcall_roomId', roomId);
