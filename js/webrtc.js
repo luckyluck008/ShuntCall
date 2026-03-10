@@ -26,11 +26,30 @@ const ShuntCallWebRTC = {
     this.signaling = signaling;
     this.pendingIceCandidates = {};
     
+    // Add local stream track event listeners for dynamic track management
+    if (this.localStream) {
+      this.setupLocalStreamTrackListeners(this.localStream);
+    }
+    
     console.log('WebRTC init - stream:', !!localStream, 'peerId:', peerId.slice(0, 16));
     
     this.setupSignalingListeners();
     console.log('ShuntCallWebRTC initialized');
     return this;
+  },
+
+  setupLocalStreamTrackListeners(stream) {
+    // Listen for new tracks being added to local stream
+    stream.onaddtrack = (event) => {
+      console.log('Local track added:', event.track.kind);
+      this.addLocalTrack(event.track, stream);
+    };
+
+    // Listen for tracks being removed from local stream
+    stream.onremovetrack = (event) => {
+      console.log('Local track removed:', event.track.kind);
+      this.removeLocalTrack(event.track);
+    };
   },
 
    setupSignalingListeners() {
@@ -94,10 +113,45 @@ const ShuntCallWebRTC = {
     
     pc.ontrack = (event) => {
       console.log('Track received from:', remotePeerId.slice(0, 16) + '...');
+      const { track, streams } = event;
+      
+      // Add track error listener
+      track.onended = () => {
+        console.log('Remote track ended:', track.kind, remotePeerId.slice(0, 16));
+        this.emit('trackEnded', {
+          peerId: remotePeerId,
+          track,
+          kind: track.kind
+        });
+      };
+      
+      track.onerror = (error) => {
+        console.error('Remote track error:', track.kind, remotePeerId.slice(0, 16), error);
+        this.emit('trackError', {
+          peerId: remotePeerId,
+          track,
+          kind: track.kind,
+          error
+        });
+      };
+      
+      // Emit both remoteStream and track events for flexibility
       this.emit('remoteStream', {
         peerId: remotePeerId,
-        stream: event.streams[0]
+        stream: streams[0]
       });
+      
+      this.emit('trackReceived', {
+        peerId: remotePeerId,
+        track,
+        stream: streams[0],
+        kind: track.kind
+      });
+    };
+    
+    // Listen for track events from the peer connection
+    pc.onsignalingstatechange = () => {
+      console.log(`Peer ${remotePeerId.slice(0, 16)} signaling state:`, pc.signalingState);
     };
     
     pc.onconnectionstatechange = () => {
@@ -106,6 +160,11 @@ const ShuntCallWebRTC = {
     
     pc.oniceconnectionstatechange = () => {
       this.handleICEConnectionStateChange(pc);
+    };
+    
+    // Listen for ICE gathering state changes
+    pc.onicegatheringstatechange = () => {
+      console.log(`Peer ${remotePeerId.slice(0, 16)} ICE gathering state:`, pc.iceGatheringState);
     };
     
     this.peerConnections[remotePeerId] = pc;
@@ -274,6 +333,47 @@ const ShuntCallWebRTC = {
     }
   },
 
+  async handleTrackFailure(peerId, track, error) {
+    console.error('Track failure for peer:', peerId.slice(0, 16), 'track:', track.kind, 'error:', error);
+    
+    this.emit('trackFailure', {
+      peerId,
+      track,
+      kind: track.kind,
+      error
+    });
+    
+    // Try to recover the track
+    try {
+      const pc = this.peerConnections[peerId];
+      if (pc && pc.connectionState === 'connected') {
+        // Check if track is still available locally
+        const localTracks = this.getLocalTracks();
+        const sameKindTrack = localTracks.find(t => t.kind === track.kind && t.readyState === 'live');
+        
+        if (sameKindTrack) {
+          console.log('Trying to recover track by replacing with same kind track');
+          const receiver = pc.getReceivers().find(r => r.track === track);
+          if (receiver) {
+            // For outgoing tracks, we need to find the sender
+            const sender = pc.getSenders().find(s => s.track?.kind === track.kind);
+            if (sender) {
+              await sender.replaceTrack(sameKindTrack);
+              console.log('Track recovered successfully');
+              this.emit('trackRecovered', {
+                peerId,
+                track: sameKindTrack,
+                kind: sameKindTrack.kind
+              });
+            }
+          }
+        }
+      }
+    } catch (recoveryError) {
+      console.error('Track recovery failed:', recoveryError);
+    }
+  },
+
   async getStats(peerId) {
     const pc = this.peerConnections[peerId];
     if (!pc) return null;
@@ -301,6 +401,7 @@ const ShuntCallWebRTC = {
 
   addLocalStream(stream) {
     this.localStream = stream;
+    this.setupLocalStreamTrackListeners(stream);
     
     Object.values(this.peerConnections).forEach(pc => {
       stream.getTracks().forEach(track => {
@@ -312,6 +413,95 @@ const ShuntCallWebRTC = {
         }
       });
     });
+  },
+
+  addLocalTrack(track, stream) {
+    console.log('Adding local track to all peers:', track.kind);
+    
+    Object.values(this.peerConnections).forEach(pc => {
+      const sender = pc.getSenders().find(s => s.track?.kind === track.kind);
+      if (sender) {
+        sender.replaceTrack(track).catch(error => {
+          console.error('Failed to replace track:', error);
+        });
+      } else {
+        pc.addTrack(track, stream || this.localStream);
+      }
+    });
+    
+    this.emit('localTrackAdded', { track, kind: track.kind });
+  },
+
+  removeLocalTrack(track) {
+    console.log('Removing local track from all peers:', track.kind);
+    
+    Object.values(this.peerConnections).forEach(pc => {
+      const sender = pc.getSenders().find(s => s.track === track);
+      if (sender) {
+        sender.replaceTrack(null).catch(error => {
+          console.error('Failed to remove track:', error);
+        });
+      }
+    });
+    
+    this.emit('localTrackRemoved', { track, kind: track.kind });
+  },
+
+  getRemoteTracks(peerId) {
+    const pc = this.peerConnections[peerId];
+    if (!pc) return [];
+    
+    const tracks = [];
+    pc.getReceivers().forEach(receiver => {
+      if (receiver.track) {
+        tracks.push(receiver.track);
+      }
+    });
+    return tracks;
+  },
+
+  getLocalTracks() {
+    if (!this.localStream) return [];
+    return this.localStream.getTracks();
+  },
+
+  async replaceTrack(peerId, oldTrack, newTrack) {
+    const pc = this.peerConnections[peerId];
+    if (!pc) {
+      console.warn('No peer connection found for track replacement:', peerId);
+      return false;
+    }
+    
+    try {
+      const sender = pc.getSenders().find(s => s.track === oldTrack);
+      if (sender) {
+        await sender.replaceTrack(newTrack);
+        console.log('Track replaced successfully for peer:', peerId.slice(0, 16));
+        return true;
+      }
+      
+      // If old track not found, try to find by kind
+      const kindSender = pc.getSenders().find(s => s.track?.kind === newTrack.kind);
+      if (kindSender) {
+        await kindSender.replaceTrack(newTrack);
+        console.log('Track replaced by kind successfully for peer:', peerId.slice(0, 16));
+        return true;
+      }
+      
+      // If no sender found, add as new track
+      pc.addTrack(newTrack, this.localStream);
+      console.log('New track added successfully for peer:', peerId.slice(0, 16));
+      return true;
+    } catch (error) {
+      console.error('Failed to replace track:', error);
+      this.emit('trackError', {
+        peerId,
+        track: oldTrack,
+        kind: oldTrack?.kind || newTrack.kind,
+        error
+      });
+      return false;
+    }
   },
 
   on(event, callback) {
