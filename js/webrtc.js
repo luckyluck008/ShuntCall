@@ -34,23 +34,35 @@ const ShuntCallWebRTC = {
   },
 
    setupSignalingListeners() {
+    this.signaling.on('presence', async (data) => {
+      console.log('Received presence event from:', data.from.slice(0, 16) + '...');
+      await this.handlePresence(data.from);
+    });
+
     this.signaling.on('offer', async (data) => {
       console.log('Received offer event from:', data.from.slice(0, 16) + '...');
-      await this.handleOffer(data.from, JSON.parse(data.sdp), data.eventId);
+      await this.handleOffer(data.from, {type: 'offer', sdp: data.sdp}, data.eventId);
     });
-    
+
     this.signaling.on('answer', async (data) => {
       console.log('Received answer event from:', data.from.slice(0, 16) + '...');
-      await this.handleAnswer(data.from, JSON.parse(data.sdp));
+      await this.handleAnswer(data.from, {type: 'answer', sdp: data.sdp});
     });
-    
+
     this.signaling.on('iceCandidate', async (data) => {
       console.log('Received ICE candidate from:', data.from.slice(0, 16) + '...');
       await this.handleIceCandidate(data.from, data.candidate);
     });
   },
 
-   createPeerConnection(remotePeerId) {
+  async handlePresence(fromPeerId) {
+    console.log('Handling presence from:', fromPeerId.slice(0, 16) + '...');
+
+    // Create a dedicated offer for this peer
+    await this.createOffer(fromPeerId);
+  },
+
+  createPeerConnection(remotePeerId) {
     const pc = new RTCPeerConnection(this.config);
     
     pc.peerId = remotePeerId;
@@ -103,38 +115,38 @@ const ShuntCallWebRTC = {
 
   async handleOffer(fromPeerId, sdp, eventId) {
     console.log('Processing offer from:', fromPeerId.slice(0, 16) + '...');
-    
+
     let pc = this.peerConnections[fromPeerId];
     if (!pc) {
       pc = this.createPeerConnection(fromPeerId);
     }
-    
+
     await pc.setRemoteDescription(new RTCSessionDescription(sdp));
     console.log('Remote description set for offer');
-    
+
     this.processPendingIceCandidates(fromPeerId);
-    
+
     const answer = await pc.createAnswer();
     await pc.setLocalDescription(answer);
-    
+
     await this.waitForIceGathering(pc);
-    
+
     console.log('Sending answer to:', fromPeerId.slice(0, 16) + '...');
     await this.signaling.sendAnswer(fromPeerId, answer, eventId);
   },
 
   async handleAnswer(fromPeerId, sdp) {
     console.log('Processing answer from:', fromPeerId.slice(0, 16) + '...');
-    
+
     const pc = this.peerConnections[fromPeerId];
     if (!pc) {
       console.warn('No peer connection for answer:', fromPeerId.slice(0, 16) + '...');
       return;
     }
-    
+
     await pc.setRemoteDescription(new RTCSessionDescription(sdp));
     console.log('Remote description set for answer');
-    
+
     this.processPendingIceCandidates(fromPeerId);
   },
 
@@ -222,37 +234,7 @@ const ShuntCallWebRTC = {
     return offer;
   },
 
-  async broadcastOffer() {
-    try {
-      if (!this.localStream) {
-        console.log('WebRTC: Cannot broadcast offer - localStream not ready');
-        return;
-      }
-      
-      console.log('WebRTC: Creating offer for broadcast');
-      
-      // Create a dummy peer connection for broadcast
-      const dummyPeerId = 'broadcast';
-      let pc = this.peerConnections[dummyPeerId];
-      if (!pc) {
-        pc = this.createPeerConnection(dummyPeerId);
-      }
-      
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      
-      await this.waitForIceGathering(pc);
-      
-      console.log('Sending broadcast offer');
-      
-      // Send the actual RTCSessionDescription or just the SDP string
-      await this.signaling.broadcastOffer(offer);
-      
-    } catch (error) {
-      console.error('WebRTC: Broadcast offer error', error);
-      throw error;
-    }
-  },
+
 
   handleConnectionStateChange(pc) {
     console.log(`Peer ${pc.peerId?.slice(0, 16)} connection state:`, pc.connectionState);

@@ -87,9 +87,15 @@ const NostrSignaling = {
       
       this.sentEvents.add(eventId);
 
-      const data = JSON.parse(event.content);
-      
-       if (data.type === 'offer' && data.sdp) {
+       const data = JSON.parse(event.content);
+
+        if (data.type === 'presence') {
+        console.log('NostrSignaling: Received presence from', event.pubkey.slice(0, 16) + '...');
+        this.emit('presence', {
+          from: event.pubkey,
+          eventId: eventId
+        });
+      } else if (data.type === 'offer' && data.sdp) {
         console.log('NostrSignaling: Received offer from', event.pubkey.slice(0, 16) + '...');
         this.emit('offer', {
           from: event.pubkey,
@@ -164,12 +170,11 @@ const NostrSignaling = {
     }
   },
 
-   async broadcastOffer(offer) {
+   async broadcastPresence() {
     try {
-      console.log('NostrSignaling: Broadcasting offer to room');
+      console.log('NostrSignaling: Broadcasting presence to room');
       const payload = {
-        type: 'offer',
-        sdp: offer.sdp,
+        type: 'presence',
         from: this.nostr.keys.publicKey
       };
 
@@ -178,9 +183,9 @@ const NostrSignaling = {
       ];
 
       const event = await this.nostr.publish(EVENT_KIND, tags, JSON.stringify(payload));
-      console.log('NostrSignaling: Broadcast offer sent - event:', event.id.slice(0, 16));
+      console.log('NostrSignaling: Presence broadcast sent - event:', event.id.slice(0, 16));
     } catch (error) {
-      console.error('NostrSignaling: Broadcast offer error', error);
+      console.error('NostrSignaling: Broadcast presence error', error);
       throw error;
     }
   },

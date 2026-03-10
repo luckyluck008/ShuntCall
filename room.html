@@ -312,15 +312,11 @@
             this.updatePeerStatus(data.peerId, data.state);
           });
 
-          // Setup Nostr event handlers - respond to offers automatically
-          this.signaling.on('offer', async (data) => {
-            console.log('Received offer from:', data.from.slice(0, 16) + '...');
-            // WebRTC handles this automatically via setupSignalingListeners
-          });
 
-           // Broadcast our offer so existing peers can connect to us
-          console.log('Broadcasting initial offer...');
-          await this.webrtc.broadcastOffer();
+
+           // Broadcast our presence so existing peers can connect to us
+           console.log('Broadcasting presence...');
+           await this.signaling.broadcastPresence();
 
           this.setupEventListeners();
           this.updatePeerCount();
