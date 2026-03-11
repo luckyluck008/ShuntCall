@@ -11,11 +11,19 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   
-  <script src="https://unpkg.com/nostr-tools@2.7.2/lib/nostr.bundle.js"></script>
-  <script src="js/crypto.js"></script>
-  <script src="js/nostr.js"></script>
-  <script src="js/nostr-signaling.js"></script>
-  <script src="js/webrtc.js"></script>
+   <script src="https://unpkg.com/nostr-tools@2.7.2/lib/nostr.bundle.js"></script>
+   <script type="module">
+     import { ShuntCallCrypto } from './js/crypto.js';
+     import { Nostr } from './js/nostr.js';
+     import { NostrSignaling } from './js/nostr-signaling.js';
+     import { ShuntCallWebRTC } from './js/webrtc.js';
+     
+     // Expose modules globally
+     window.ShuntCallCrypto = ShuntCallCrypto;
+     window.Nostr = Nostr;
+     window.NostrSignaling = NostrSignaling;
+     window.ShuntCallWebRTC = ShuntCallWebRTC;
+   </script>
 
   <style>
     /* Custom Design Elements */

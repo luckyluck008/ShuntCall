@@ -235,7 +235,7 @@ const ShuntCallFakePeer = {
   /**
    * Open fake peer in new window
    */
-  static openFakePeer(roomId, namespace) {
+  openFakePeer(roomId, namespace) {
     const baseUrl = window.location.origin + window.location.pathname.replace(/\/[^\/]*$/, '/');
     const fakeUrl = `${baseUrl}room.html?room=${encodeURIComponent(roomId)}&hash=${namespace}&fake=true`;
     window.open(fakeUrl, '_blank', 'width=800,height=600');
@@ -244,7 +244,7 @@ const ShuntCallFakePeer = {
   /**
    * Check if this is a fake peer request
    */
-  static isFakeRequest() {
+  isFakeRequest() {
     const params = new URLSearchParams(window.location.search);
     return params.get('fake') === 'true';
   },
@@ -278,8 +278,5 @@ if (typeof window !== 'undefined') {
   window.ShuntCallFakePeer = ShuntCallFakePeer;
 }
 
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = ShuntCallFakePeer;
-}
-
+export { ShuntCallFakePeer };
 console.log('ShuntCallFakePeer module loaded');

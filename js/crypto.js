@@ -58,8 +58,5 @@ if (typeof window !== 'undefined') {
   window.ShuntCallCrypto = ShuntCallCrypto;
 }
 
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = ShuntCallCrypto;
-}
-
+export { ShuntCallCrypto };
 console.log('ShuntCallCrypto module loaded');

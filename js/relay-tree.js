@@ -343,8 +343,5 @@ if (typeof window !== 'undefined') {
   window.ShuntCallRelayTree = ShuntCallRelayTree;
 }
 
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = ShuntCallRelayTree;
-}
-
+export { ShuntCallRelayTree };
 console.log('ShuntCallRelayTree module loaded');

@@ -643,8 +643,5 @@ if (typeof window !== 'undefined') {
   window.ShuntCallWebRTC = ShuntCallWebRTC;
 }
 
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = ShuntCallWebRTC;
-}
-
+export { ShuntCallWebRTC };
 console.log('ShuntCallWebRTC module loaded');

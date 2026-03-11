@@ -244,6 +244,6 @@ const NostrSignaling = {
 };
 
 if (typeof window !== 'undefined') window.NostrSignaling = NostrSignaling;
-if (typeof module !== 'undefined') module.exports = NostrSignaling;
 
+export { NostrSignaling };
 console.log('NostrSignaling module loaded');

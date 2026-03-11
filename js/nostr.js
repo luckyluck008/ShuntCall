@@ -317,6 +317,6 @@ const Nostr = {
 };
 
 if (typeof window !== 'undefined') window.Nostr = Nostr;
-if (typeof module !== 'undefined') module.exports = Nostr;
 
+export { Nostr };
 console.log('Nostr module loaded');
