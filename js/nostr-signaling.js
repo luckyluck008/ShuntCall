@@ -89,12 +89,16 @@ const NostrSignaling = {
 
        const data = JSON.parse(event.content);
 
-        if (data.type === 'presence') {
-        console.log('NostrSignaling: Received presence from', event.pubkey.slice(0, 16) + '...');
-        this.emit('presence', {
-          from: event.pubkey,
-          eventId: eventId
-        });
+         if (data.type === 'presence') {
+         console.log('=== NostrSignaling handleIncomingEvent ===');
+         console.log('Presence received from:', event.pubkey.slice(0, 16) + '...');
+         console.log('Emitting presence event...');
+         console.log('Listeners for presence:', this.listeners['presence']?.length || 0);
+         this.emit('presence', {
+           from: event.pubkey,
+           eventId: eventId
+         });
+         console.log('Presence event emitted successfully');
       } else if (data.type === 'offer' && data.sdp) {
         console.log('NostrSignaling: Received offer from', event.pubkey.slice(0, 16) + '...');
         this.emit('offer', {
