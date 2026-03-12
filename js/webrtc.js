@@ -74,12 +74,20 @@ const ShuntCallWebRTC = {
     });
   },
 
-  async handlePresence(fromPeerId) {
-    console.log('Handling presence from:', fromPeerId.slice(0, 16) + '...');
-
-    // Create a dedicated offer for this peer
-    await this.createOffer(fromPeerId);
-  },
+   async handlePresence(fromPeerId) {
+     console.log('=== WebRTC handlePresence ===');
+     console.log('From peer:', fromPeerId.slice(0, 16) + '...');
+     console.log('Current peer connections:', Object.keys(this.peerConnections));
+     
+     try {
+       // Create a dedicated offer for this peer
+       const offer = await this.createOffer(fromPeerId);
+       console.log('Offer created successfully:', offer?.type);
+     } catch (error) {
+       console.error('Error handling presence:', error);
+       console.error('Error stack:', error.stack);
+     }
+   },
 
    createPeerConnection(remotePeerId) {
     const pc = new RTCPeerConnection(this.config);
