@@ -40,27 +40,29 @@ const NostrSignaling = {
     return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
   },
 
-  setupSubscriptions() {
-    try {
-      // Get events from the last 60 seconds to catch offers published before we subscribed
-      const since = Math.floor(Date.now() / 1000) - 60;
-      
-      const filters = [
-        {
-          kinds: [EVENT_KIND],
-          '#t': [this.roomTag],
-          since: since
-        }
-      ];
+   setupSubscriptions() {
+     try {
+       // Get events from the last 60 seconds to catch offers published before we subscribed
+       const since = Math.floor(Date.now() / 1000) - 60;
+       
+       const filters = [
+         {
+           kinds: [EVENT_KIND],
+           '#t': [this.roomTag],
+           since: since
+         }
+       ];
 
-      console.log('NostrSignaling: Subscribing with filters', JSON.stringify(filters));
-      
-      this.nostr.subscribe('room-' + this.roomTag, filters, (event) => {
-        console.log('NostrSignaling: Received event from', event.pubkey?.slice(0, 16), 'content type:', event.content ? JSON.parse(event.content).type : 'none');
-        this.handleIncomingEvent(event);
-      }, () => {
-        console.log('NostrSignaling: EOSE received');
-      });
+       // Use shorter subscription ID (first 16 chars of room tag) to avoid relay limits
+       const shortRoomTag = this.roomTag.slice(0, 16);
+       console.log('NostrSignaling: Subscribing with filters', JSON.stringify(filters));
+       
+       this.nostr.subscribe('room-' + shortRoomTag, filters, (event) => {
+         console.log('NostrSignaling: Received event from', event.pubkey?.slice(0, 16), 'content type:', event.content ? JSON.parse(event.content).type : 'none');
+         this.handleIncomingEvent(event);
+       }, () => {
+         console.log('NostrSignaling: EOSE received');
+       });
     } catch (error) {
       console.error('NostrSignaling: Subscription setup error', error);
       throw error;
