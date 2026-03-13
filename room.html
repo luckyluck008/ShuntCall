@@ -505,18 +505,32 @@
              } : false
            });
 
-           const localVideo = document.getElementById('localVideo');
-           localVideo.srcObject = this.localStream;
-           
-           console.log('Media initialized');
-
-           // Handle stream ended events
-           this.localStream.getTracks().forEach(track => {
-             track.onended = () => {
-               console.warn(`Media track ended: ${track.kind}`);
-               this.handleTrackEnded(track.kind);
-             };
-           });
+            const localVideo = document.getElementById('localVideo');
+            
+            // Check if this.localStream is a valid MediaStream object before setting srcObject
+            if (this.localStream && typeof this.localStream === 'object' && 'getTracks' in this.localStream) {
+              // Try to set srcObject - only works if we have a real MediaStream
+              try {
+                if (typeof this.localStream.getAudioTracks === 'function' && typeof this.localStream.getVideoTracks === 'function') {
+                  localVideo.srcObject = this.localStream;
+                  console.log('Media initialized');
+                  
+                  // Handle stream ended events
+                  this.localStream.getTracks().forEach(track => {
+                    track.onended = () => {
+                      console.warn(`Media track ended: ${track.kind}`);
+                      this.handleTrackEnded(track.kind);
+                    };
+                  });
+                } else {
+                  console.warn('Mock stream detected - skipping srcObject assignment');
+                }
+              } catch (e) {
+                console.warn('Failed to set video srcObject:', e.message);
+              }
+            } else {
+              console.warn('No valid media stream available');
+            }
 
          } catch (error) {
            console.error('Media error:', error);

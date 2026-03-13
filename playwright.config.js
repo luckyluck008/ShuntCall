@@ -15,18 +15,4 @@ export default defineConfig({
     trace: 'on-first-retry',
     headless: true,
   },
-  webServer: [
-    {
-      command: 'npm run relay',
-      port: 8768,
-      timeout: 30000,
-      reuseExistingServer: true,
-    },
-    {
-      command: 'npx http-server . -p 8765',
-      port: 8765,
-      timeout: 30000,
-      reuseExistingServer: true,
-    }
-  ],
 });

@@ -89,14 +89,14 @@ const ShuntCallWebRTC = {
      }
    },
 
-   createPeerConnection(remotePeerId) {
-    const pc = new RTCPeerConnection(this.config);
-    
-    pc.peerId = remotePeerId;
-    pc.connectionState = 'new';
-    pc.reconnectAttempts = 0;
-    pc.maxReconnectAttempts = 3;
-    this.pendingIceCandidates[remotePeerId] = [];
+    createPeerConnection(remotePeerId) {
+     const pc = new RTCPeerConnection(this.config);
+     
+     pc.peerId = remotePeerId;
+     pc.internalConnectionState = 'new';
+     pc.reconnectAttempts = 0;
+     pc.maxReconnectAttempts = 3;
+     this.pendingIceCandidates[remotePeerId] = [];
     
     if (this.localStream) {
       console.log('Adding local tracks to peer connection:', this.localStream.getTracks().map(t => ({
