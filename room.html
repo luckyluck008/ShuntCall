@@ -470,40 +470,40 @@
         document.getElementById('room').classList.add('hidden');
       },
 
-       async initMedia() {
-         const isSecure = window.location.protocol === 'https:' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-         
-         if (!isSecure) {
-           throw new Error('System requires HTTPS or localhost for media access.');
-         }
+        async initMedia() {
+          const isSecure = window.location.protocol === 'https:' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+          
+          if (!isSecure) {
+            throw new Error('System requires HTTPS or localhost for media access.');
+          }
 
-         // Show media permission prompt
-         this.showMediaPermissionModal();
-         
-         // Wait for user to confirm
-         await new Promise((resolve, reject) => {
-           this.mediaPermissionResolve = resolve;
-           this.mediaPermissionReject = reject;
-         });
+          // Show media permission prompt
+          this.showMediaPermissionModal();
+          
+          // Wait for user to confirm
+          await new Promise((resolve, reject) => {
+            this.mediaPermissionResolve = resolve;
+            this.mediaPermissionReject = reject;
+          });
 
-         try {
-           // Validate that at least one media type is enabled
-           if (!this.mediaOptions.video && !this.mediaOptions.audio) {
-             throw new Error('At least one media type (audio or video) must be enabled.');
-           }
+          try {
+            // Validate that at least one media type is enabled
+            if (!this.mediaOptions.video && !this.mediaOptions.audio) {
+              throw new Error('At least one media type (audio or video) must be enabled.');
+            }
 
-           this.localStream = await navigator.mediaDevices.getUserMedia({
-             video: this.mediaOptions.video ? {
-               width: { ideal: 1280 },
-               height: { ideal: 720 },
-               frameRate: { ideal: 30 }
-             } : false,
-             audio: this.mediaOptions.audio ? {
-               echoCancellation: true,
-               noiseSuppression: true,
-               autoGainControl: true
-             } : false
-           });
+            this.localStream = await navigator.mediaDevices.getUserMedia({
+              video: this.mediaOptions.video ? {
+                width: { ideal: 1280 },
+                height: { ideal: 720 },
+                frameRate: { ideal: 30 }
+              } : false,
+              audio: this.mediaOptions.audio ? {
+                echoCancellation: true,
+                noiseSuppression: true,
+                autoGainControl: true
+              } : false
+            });
 
             const localVideo = document.getElementById('localVideo');
             
@@ -521,7 +521,30 @@
                       console.warn(`Media track ended: ${track.kind}`);
                       this.handleTrackEnded(track.kind);
                     };
+                    
+                    track.onerror = (error) => {
+                      console.error(`Media track error: ${track.kind}`, error);
+                      this.handleTrackEnded(track.kind);
+                    };
                   });
+                  
+                  // Verify tracks are actually live
+                  const audioTracks = this.localStream.getAudioTracks();
+                  const videoTracks = this.localStream.getVideoTracks();
+                  
+                  audioTracks.forEach(track => {
+                    if (track.readyState !== 'live') {
+                      console.warn(`Audio track not live: ${track.readyState}`);
+                    }
+                  });
+                  
+                  videoTracks.forEach(track => {
+                    if (track.readyState !== 'live') {
+                      console.warn(`Video track not live: ${track.readyState}`);
+                    }
+                  });
+                  
+                  console.log(`Media tracks: ${audioTracks.length} audio, ${videoTracks.length} video`);
                 } else {
                   console.warn('Mock stream detected - skipping srcObject assignment');
                 }
@@ -532,12 +555,12 @@
               console.warn('No valid media stream available');
             }
 
-         } catch (error) {
-           console.error('Media error:', error);
-           this.showError('Hardware access error', error.message);
-           throw error;
-         }
-       },
+          } catch (error) {
+            console.error('Media error:', error);
+            this.showError('Hardware access error', error.message);
+            throw error;
+          }
+        },
 
        showMediaPermissionModal() {
          // Create styled media permission modal

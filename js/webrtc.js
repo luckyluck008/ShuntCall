@@ -355,21 +355,70 @@ const ShuntCallWebRTC = {
   optimizeSDP(sessionDescription) {
     let sdp = sessionDescription.sdp;
     
-    // Prioritize VP8 and H.264 codecs for better compatibility
-    if (sdp.includes('VP8')) {
-      // Reorder codecs to prioritize VP8
-      sdp = sdp.replace(/(m=video.*?)(VP8.*?)(H264.*?)(\\r\\n)/s, '$1$2$3');
-    }
+    // Prioritize VP8 and H.264 codecs for video
+    sdp = this.prioritizeVideoCodecs(sdp);
     
-    // Ensure audio codecs are properly configured
-    if (sdp.includes('opus')) {
-      // Prioritize Opus codec
-      sdp = sdp.replace(/(m=audio.*?)(opus.*?)(PCMU.*?)(\\r\\n)/s, '$1$2$3');
-    }
+    // Prioritize Opus codec for audio
+    sdp = this.prioritizeAudioCodecs(sdp);
     
     return new RTCSessionDescription({
       type: sessionDescription.type,
       sdp: sdp
+    });
+  },
+
+  prioritizeVideoCodecs(sdp) {
+    // Video codec preference order: VP8 > H.264 > others
+    const preferredVideoCodecs = ['VP8', 'H264'];
+    return this.prioritizeCodecs(sdp, 'video', preferredVideoCodecs);
+  },
+
+  prioritizeAudioCodecs(sdp) {
+    // Audio codec preference order: Opus > PCMU > others
+    const preferredAudioCodecs = ['opus', 'PCMU'];
+    return this.prioritizeCodecs(sdp, 'audio', preferredAudioCodecs);
+  },
+
+  prioritizeCodecs(sdp, mediaType, preferredCodecs) {
+    const mediaSectionRegex = new RegExp(`m=${mediaType}.*?(?=m=|$)`, 's');
+    return sdp.replace(mediaSectionRegex, (mediaSection) => {
+      // Find codec payload types and names
+      const codecPattern = /(\d+)\s+([\w-]+)/g;
+      const codecs = [];
+      let match;
+      
+      while ((match = codecPattern.exec(mediaSection)) !== null) {
+        if (mediaSection.includes(`a=rtpmap:${match[1]} ${match[2]}`)) {
+          codecs.push({
+            payloadType: match[1],
+            name: match[2]
+          });
+        }
+      }
+      
+      // Reorder codecs based on preferences
+      const orderedCodecs = [];
+      const otherCodecs = [];
+      
+      preferredCodecs.forEach(preferred => {
+        const codec = codecs.find(c => c.name.toLowerCase().includes(preferred.toLowerCase()));
+        if (codec) {
+          orderedCodecs.push(codec);
+        }
+      });
+      
+      codecs.forEach(codec => {
+        if (!orderedCodecs.find(c => c.payloadType === codec.payloadType)) {
+          otherCodecs.push(codec);
+        }
+      });
+      
+      const reorderedCodecs = [...orderedCodecs, ...otherCodecs];
+      
+      return mediaSection.replace(
+        /m=\w+ \d+ RTP\/SAVPF [\d\s]+/,
+        `m=${mediaType} 9 RTP/SAVPF ${reorderedCodecs.map(c => c.payloadType).join(' ')}`
+      );
     });
   },
 
@@ -453,6 +502,10 @@ const ShuntCallWebRTC = {
                 kind: sameKindTrack.kind
               });
             }
+          } else {
+            // Try to add the track again if it's missing
+            console.log('Track not found - trying to add again');
+            pc.addTrack(sameKindTrack, this.localStream);
           }
         }
       }
@@ -484,13 +537,28 @@ const ShuntCallWebRTC = {
     senders.forEach(sender => {
       if (sender.track && sender.track.readyState !== 'live') {
         console.warn('Sender track not live:', sender.track.kind, sender.track.readyState);
+        this.handleTrackFailure(peerId, sender.track, new Error('Track not live'));
       }
     });
 
     receivers.forEach(receiver => {
       if (receiver.track && receiver.track.readyState !== 'live') {
         console.warn('Receiver track not live:', receiver.track.kind, receiver.track.readyState);
+        this.handleTrackFailure(peerId, receiver.track, new Error('Track not live'));
       }
+    });
+
+    // Verify that we have both audio and video tracks if expected
+    const hasAudioSender = senders.some(s => s.track?.kind === 'audio');
+    const hasVideoSender = senders.some(s => s.track?.kind === 'video');
+    const hasAudioReceiver = receivers.some(r => r.track?.kind === 'audio');
+    const hasVideoReceiver = receivers.some(r => r.track?.kind === 'video');
+
+    console.log('Track presence:', {
+      sendAudio: hasAudioSender,
+      sendVideo: hasVideoSender,
+      recvAudio: hasAudioReceiver,
+      recvVideo: hasVideoReceiver
     });
   },
 
