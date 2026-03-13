@@ -337,13 +337,19 @@
            const ourPubkey = this.signaling.nostr.keys.publicKey;
            console.log('Our pubkey:', ourPubkey.slice(0, 16) + '...');
 
-            // Initialize WebRTC
-            this.webrtc = ShuntCallWebRTC;
-            this.webrtc.init(this.localStream, ourPubkey, this.signaling);
-            
-            // Initialize Relay Tree
-            this.relayTree = ShuntCallRelayTree;
-            this.relayTree.init(ourPubkey, this.webrtc);
+             // Initialize WebRTC
+             this.webrtc = ShuntCallWebRTC;
+             this.webrtc.init(this.localStream, ourPubkey, this.signaling);
+             
+             // Initialize Relay Tree
+             this.relayTree = ShuntCallRelayTree;
+             this.relayTree.init(ourPubkey, this.webrtc);
+             
+             // Setup signaling presence listener
+             this.signaling.on('presence', async (data) => {
+               console.log('Room: Received presence from', data.from.slice(0, 16) + '...');
+               await this.webrtc.handlePresence(data.from);
+             });
 
              // Setup WebRTC event handlers
              this.webrtc.on('remoteStream', (data) => {
