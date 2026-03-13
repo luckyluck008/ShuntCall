@@ -28,9 +28,10 @@ test.describe('Audio/Video Transmission Tests', () => {
     setupConsoleLogging(page1, 'P1');
     setupConsoleLogging(page2, 'P2');
     
-    // Mock media devices before navigating to pages
-    await page1.evaluate(() => {
-      // Create a proper MediaStream-like object with video element support
+    // Mock media devices by adding them to the context before creating pages
+    // Use a simpler approach - mock at context level
+    const mockMediaStream = () => {
+      // Create canvas for video track
       const canvas = document.createElement('canvas');
       canvas.width = 640;
       canvas.height = 480;
@@ -39,47 +40,89 @@ test.describe('Audio/Video Transmission Tests', () => {
       
       const stream = canvas.captureStream(30);
       
-      // Add mock audio track
-      const audioContext = new AudioContext();
-      const oscillator = audioContext.createOscillator();
-      const destination = audioContext.createMediaStreamDestination();
-      oscillator.connect(destination);
-      oscillator.frequency.value = 440;
-      oscillator.start();
+      try {
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        const oscillator = audioContext.createOscillator();
+        const destination = audioContext.createMediaStreamDestination();
+        oscillator.connect(destination);
+        oscillator.frequency.value = 440;
+        oscillator.start();
+        
+        destination.stream.getAudioTracks().forEach(track => stream.addTrack(track));
+      } catch (error) {
+        console.warn('Failed to create audio track:', error);
+      }
       
-      destination.stream.getAudioTracks().forEach(track => stream.addTrack(track));
+      return stream;
+    };
+
+    // Add mock to page1 before navigation
+    await page1.addInitScript(() => {
+      const stream = (() => {
+        const canvas = document.createElement('canvas');
+        canvas.width = 640;
+        canvas.height = 480;
+        const ctx = canvas.getContext('2d');
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        const stream = canvas.captureStream(30);
+        
+        try {
+          const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+          const oscillator = audioContext.createOscillator();
+          const destination = audioContext.createMediaStreamDestination();
+          oscillator.connect(destination);
+          oscillator.frequency.value = 440;
+          oscillator.start();
+          
+          destination.stream.getAudioTracks().forEach(track => stream.addTrack(track));
+        } catch (error) {
+          console.warn('Failed to create audio track:', error);
+        }
+        
+        return stream;
+      })();
       
       if (!navigator.mediaDevices) {
         navigator.mediaDevices = {};
       }
+      
       navigator.mediaDevices.getUserMedia = async () => stream;
       navigator.mediaDevices.getDisplayMedia = async () => stream;
       navigator.mediaDevices.enumerateDevices = async () => [];
     });
-    
-    await page2.evaluate(() => {
-      // Create a proper MediaStream-like object with video element support
-      const canvas = document.createElement('canvas');
-      canvas.width = 640;
-      canvas.height = 480;
-      const ctx = canvas.getContext('2d');
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      
-      const stream = canvas.captureStream(30);
-      
-      // Add mock audio track
-      const audioContext = new AudioContext();
-      const oscillator = audioContext.createOscillator();
-      const destination = audioContext.createMediaStreamDestination();
-      oscillator.connect(destination);
-      oscillator.frequency.value = 440;
-      oscillator.start();
-      
-      destination.stream.getAudioTracks().forEach(track => stream.addTrack(track));
+
+    // Add mock to page2 before navigation  
+    await page2.addInitScript(() => {
+      const stream = (() => {
+        const canvas = document.createElement('canvas');
+        canvas.width = 640;
+        canvas.height = 480;
+        const ctx = canvas.getContext('2d');
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        const stream = canvas.captureStream(30);
+        
+        try {
+          const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+          const oscillator = audioContext.createOscillator();
+          const destination = audioContext.createMediaStreamDestination();
+          oscillator.connect(destination);
+          oscillator.frequency.value = 440;
+          oscillator.start();
+          
+          destination.stream.getAudioTracks().forEach(track => stream.addTrack(track));
+        } catch (error) {
+          console.warn('Failed to create audio track:', error);
+        }
+        
+        return stream;
+      })();
       
       if (!navigator.mediaDevices) {
         navigator.mediaDevices = {};
       }
+      
       navigator.mediaDevices.getUserMedia = async () => stream;
       navigator.mediaDevices.getDisplayMedia = async () => stream;
       navigator.mediaDevices.enumerateDevices = async () => [];

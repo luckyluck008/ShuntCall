@@ -110,21 +110,26 @@ const ShuntCallWebRTC = {
      pc.maxReconnectAttempts = 3;
      this.pendingIceCandidates[remotePeerId] = [];
     
-    if (this.localStream) {
-      console.log('Adding local tracks to peer connection:', this.localStream.getTracks().map(t => ({
-        kind: t.kind,
-        id: t.id,
-        readyState: t.readyState,
-        enabled: t.enabled
-      })));
-      
-      this.localStream.getTracks().forEach(track => {
-        const sender = pc.addTrack(track, this.localStream);
-        console.log('Track added to peer connection:', track.kind, 'sender:', sender);
-      });
-    } else {
-      console.warn('No local stream available when creating peer connection');
-    }
+     if (this.localStream) {
+       const tracks = this.localStream.getTracks();
+       console.log('Adding local tracks to peer connection:', tracks.map(t => ({
+         kind: t.kind,
+         id: t.id,
+         readyState: t.readyState,
+         enabled: t.enabled
+       })));
+       
+       if (tracks.length === 0) {
+         console.error('ERROR: Local stream has no tracks to add');
+       } else {
+         tracks.forEach(track => {
+           const sender = pc.addTrack(track, this.localStream);
+           console.log('Track added to peer connection:', track.kind, 'sender:', sender);
+         });
+       }
+     } else {
+       console.warn('No local stream available when creating peer connection');
+     }
 
     pc.onicecandidate = (event) => {
       if (event.candidate) {
@@ -461,7 +466,7 @@ const ShuntCallWebRTC = {
     }
   },
 
-  async verifyTracks(peerId) {
+   async verifyTracks(peerId) {
     const pc = this.peerConnections[peerId];
     if (!pc) return;
 
@@ -494,6 +499,19 @@ const ShuntCallWebRTC = {
         this.handleTrackFailure(peerId, receiver.track, new Error('Track not live'));
       }
     });
+
+    // Check if we need to add missing tracks
+    if (this.localStream) {
+      const localTracks = this.localStream.getTracks();
+      const existingSenderKinds = senders.map(s => s.track?.kind).filter(Boolean);
+      
+      localTracks.forEach(track => {
+        if (!existingSenderKinds.includes(track.kind)) {
+          console.log('Adding missing track to peer connection:', track.kind);
+          pc.addTrack(track, this.localStream);
+        }
+      });
+    }
 
     // Verify that we have both audio and video tracks if expected
     const hasAudioSender = senders.some(s => s.track?.kind === 'audio');

@@ -3,16 +3,32 @@ import { test, expect } from '@playwright/test';
 // Mock media devices to avoid permission issues in headless mode
 const mockMediaDevices = async (page) => {
   await page.evaluate(() => {
-    const mockStream = {
-      getTracks: () => [],
-      addTrack: () => {},
-      removeTrack: () => {},
-      getAudioTracks: () => [],
-      getVideoTracks: () => []
-    };
+    // Create real canvas-based media stream for testing
+    const canvas = document.createElement('canvas');
+    canvas.width = 640;
+    canvas.height = 480;
+    const ctx = canvas.getContext('2d');
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
     
-    navigator.mediaDevices.getUserMedia = async () => mockStream;
-    navigator.mediaDevices.getDisplayMedia = async () => mockStream;
+    // Create video track from canvas
+    const stream = canvas.captureStream(30);
+    
+    // Create audio track using AudioContext
+    try {
+      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      const oscillator = audioContext.createOscillator();
+      const destination = audioContext.createMediaStreamDestination();
+      oscillator.connect(destination);
+      oscillator.frequency.value = 440;
+      oscillator.start();
+      
+      destination.stream.getAudioTracks().forEach(track => stream.addTrack(track));
+    } catch (error) {
+      console.warn('Failed to create audio track:', error);
+    }
+    
+    navigator.mediaDevices.getUserMedia = async () => stream;
+    navigator.mediaDevices.getDisplayMedia = async () => stream;
     navigator.mediaDevices.enumerateDevices = async () => [];
   });
 };
