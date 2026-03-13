@@ -302,10 +302,39 @@ test.describe('Relay Tree Tests', () => {
 
 test.describe('Integration Tests', () => {
   test('complete initialization flow works', async ({ browser }) => {
-    const context = await browser.newContext();
+    const context = await browser.newContext({
+      permissions: ['camera', 'microphone']
+    });
     const page = await context.newPage();
     
     page.on('console', msg => console.log('Log:', msg.text()));
+    
+    // Mock media devices before navigating to page
+    await page.evaluate(() => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 640;
+      canvas.height = 480;
+      const ctx = canvas.getContext('2d');
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      
+      const stream = canvas.captureStream(30);
+      
+      const audioContext = new AudioContext();
+      const oscillator = audioContext.createOscillator();
+      const destination = audioContext.createMediaStreamDestination();
+      oscillator.connect(destination);
+      oscillator.frequency.value = 440;
+      oscillator.start();
+      
+      destination.stream.getAudioTracks().forEach(track => stream.addTrack(track));
+      
+      if (!navigator.mediaDevices) {
+        navigator.mediaDevices = {};
+      }
+      navigator.mediaDevices.getUserMedia = async () => stream;
+      navigator.mediaDevices.getDisplayMedia = async () => stream;
+      navigator.mediaDevices.enumerateDevices = async () => [];
+    });
     
     await page.goto('http://localhost:8765/index.html');
     
