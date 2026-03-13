@@ -12,7 +12,14 @@ export default defineConfig({
   workers: 1,
   reporter: 'list',
   use: {
+    baseURL: 'http://localhost:8765',
     trace: 'on-first-retry',
     headless: true,
+  },
+  webServer: {
+    command: 'npx http-server -p 8765',
+    url: 'http://localhost:8765',
+    reuseExistingServer: !process.env.CI,
+    timeout: 30000,
   },
 });

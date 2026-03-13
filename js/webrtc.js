@@ -74,20 +74,32 @@ const ShuntCallWebRTC = {
     });
   },
 
-   async handlePresence(fromPeerId) {
-     console.log('=== WebRTC handlePresence ===');
-     console.log('From peer:', fromPeerId.slice(0, 16) + '...');
-     console.log('Current peer connections:', Object.keys(this.peerConnections));
-     
-     try {
-       // Create a dedicated offer for this peer
-       const offer = await this.createOffer(fromPeerId);
-       console.log('Offer created successfully:', offer?.type);
-     } catch (error) {
-       console.error('Error handling presence:', error);
-       console.error('Error stack:', error.stack);
-     }
-   },
+     async handlePresence(fromPeerId) {
+       console.log('=== WebRTC handlePresence ===');
+       console.log('From peer:', fromPeerId.slice(0, 16) + '...');
+       console.log('Current peer connections:', Object.keys(this.peerConnections));
+       
+       try {
+         // Check if we already have a connection with this peer
+         if (this.peerConnections[fromPeerId]) {
+           console.log('Already have a peer connection with:', fromPeerId.slice(0, 16) + '...');
+           return;
+         }
+         
+         // Wait for local stream to be available before creating offer
+         if (!this.localStream) {
+           console.warn('Local stream not available yet - skipping offer creation');
+           return;
+         }
+         
+         // Create a dedicated offer for this peer
+         const offer = await this.createOffer(fromPeerId);
+         console.log('Offer created successfully:', offer?.type);
+       } catch (error) {
+         console.error('Error handling presence:', error);
+         console.error('Error stack:', error.stack);
+       }
+     },
 
     createPeerConnection(remotePeerId) {
      const pc = new RTCPeerConnection(this.config);
@@ -352,74 +364,9 @@ const ShuntCallWebRTC = {
     return pc.localDescription;
   },
 
+  // Remove SDP optimization to prevent m-line order mismatch
   optimizeSDP(sessionDescription) {
-    let sdp = sessionDescription.sdp;
-    
-    // Prioritize VP8 and H.264 codecs for video
-    sdp = this.prioritizeVideoCodecs(sdp);
-    
-    // Prioritize Opus codec for audio
-    sdp = this.prioritizeAudioCodecs(sdp);
-    
-    return new RTCSessionDescription({
-      type: sessionDescription.type,
-      sdp: sdp
-    });
-  },
-
-  prioritizeVideoCodecs(sdp) {
-    // Video codec preference order: VP8 > H.264 > others
-    const preferredVideoCodecs = ['VP8', 'H264'];
-    return this.prioritizeCodecs(sdp, 'video', preferredVideoCodecs);
-  },
-
-  prioritizeAudioCodecs(sdp) {
-    // Audio codec preference order: Opus > PCMU > others
-    const preferredAudioCodecs = ['opus', 'PCMU'];
-    return this.prioritizeCodecs(sdp, 'audio', preferredAudioCodecs);
-  },
-
-  prioritizeCodecs(sdp, mediaType, preferredCodecs) {
-    const mediaSectionRegex = new RegExp(`m=${mediaType}.*?(?=m=|$)`, 's');
-    return sdp.replace(mediaSectionRegex, (mediaSection) => {
-      // Find codec payload types and names
-      const codecPattern = /(\d+)\s+([\w-]+)/g;
-      const codecs = [];
-      let match;
-      
-      while ((match = codecPattern.exec(mediaSection)) !== null) {
-        if (mediaSection.includes(`a=rtpmap:${match[1]} ${match[2]}`)) {
-          codecs.push({
-            payloadType: match[1],
-            name: match[2]
-          });
-        }
-      }
-      
-      // Reorder codecs based on preferences
-      const orderedCodecs = [];
-      const otherCodecs = [];
-      
-      preferredCodecs.forEach(preferred => {
-        const codec = codecs.find(c => c.name.toLowerCase().includes(preferred.toLowerCase()));
-        if (codec) {
-          orderedCodecs.push(codec);
-        }
-      });
-      
-      codecs.forEach(codec => {
-        if (!orderedCodecs.find(c => c.payloadType === codec.payloadType)) {
-          otherCodecs.push(codec);
-        }
-      });
-      
-      const reorderedCodecs = [...orderedCodecs, ...otherCodecs];
-      
-      return mediaSection.replace(
-        /m=\w+ \d+ RTP\/SAVPF [\d\s]+/,
-        `m=${mediaType} 9 RTP/SAVPF ${reorderedCodecs.map(c => c.payloadType).join(' ')}`
-      );
-    });
+    return sessionDescription;
   },
 
 
