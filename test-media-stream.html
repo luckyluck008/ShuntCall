@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Media Stream Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; background-color: #f5f5f5; }
+        .container { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); margin-bottom: 20px; }
+        .success { color: #2ecc71; font-weight: bold; }
+        .error { color: #e74c3c; font-weight: bold; }
+        .warning { color: #f39c12; font-weight: bold; }
+        video { border: 1px solid #ddd; border-radius: 4px; width: 100%; max-width: 640px; }
+        canvas { display: none; }
+    </style>
+</head>
+<body>
+    <h1>Media Stream Test</h1>
+    
+    <div class="container">
+        <h2>Test Results</h2>
+        <div id="results"></div>
+    </div>
+    
+    <div class="container">
+        <h2>Video Preview</h2>
+        <video id="videoPreview" autoplay playsinline muted></video>
+    </div>
+
+    <script>
+        const resultsDiv = document.getElementById('results');
+        const videoPreview = document.getElementById('videoPreview');
+
+        function log(message, type = 'info') {
+            const div = document.createElement('div');
+            const timestamp = new Date().toISOString().split('T')[1].split('.')[0];
+            div.textContent = `[${timestamp}] ${message}`;
+            div.className = type;
+            resultsDiv.appendChild(div);
+            console.log(message);
+        }
+
+        async function testMediaStream() {
+            try {
+                log('=== Starting Media Stream Test ===');
+                
+                // Test 1: Check if mediaDevices is available
+                if (!navigator.mediaDevices) {
+                    log('❌ navigator.mediaDevices is not available (WebRTC not supported)', 'error');
+                    return;
+                }
+                
+                log('✅ navigator.mediaDevices is available');
+                
+                // Test 2: Try to get user media
+                log('Trying to access media devices...');
+                const constraints = {
+                    video: { 
+                        width: { ideal: 640 }, 
+                        height: { ideal: 480 }, 
+                        frameRate: { ideal: 30 },
+                        facingMode: 'user'
+                    },
+                    audio: {
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        autoGainControl: true
+                    }
+                };
+                
+                const stream = await navigator.mediaDevices.getUserMedia(constraints);
+                log('✅ Media stream obtained successfully');
+                
+                // Test 3: Check stream properties
+                log(`Stream active: ${stream.active}`, stream.active ? 'success' : 'error');
+                log(`Stream id: ${stream.id}`);
+                
+                // Test 4: Check tracks
+                const tracks = stream.getTracks();
+                log(`Number of tracks: ${tracks.length}`, tracks.length > 0 ? 'success' : 'error');
+                
+                tracks.forEach((track, index) => {
+                    log(`Track ${index}: kind=${track.kind}, readyState=${track.readyState}, enabled=${track.enabled}, id=${track.id}`);
+                    
+                    // Test track event listeners
+                    track.onended = () => log(`Track ${index} ended`, 'warning');
+                    track.onerror = (e) => log(`Track ${index} error: ${e}`, 'error');
+                });
+                
+                // Test 5: Display video preview
+                videoPreview.srcObject = stream;
+                
+                // Test 6: Check track methods
+                tracks.forEach(track => {
+                    log(`Track ${track.kind} label: ${track.label}`);
+                });
+                
+                log('=== Test Completed Successfully ===', 'success');
+                
+            } catch (error) {
+                log(`❌ Test failed: ${error}`, 'error');
+                log(`Error name: ${error.name}`);
+                log(`Error message: ${error.message}`);
+                if (error.constraintName) {
+                    log(`Constraint failed: ${error.constraintName}`);
+                }
+                
+                // Try fallback options
+                if (error.name === 'NotAllowedError') {
+                    log('⚠️ Permission denied - user blocked access', 'warning');
+                } else if (error.name === 'NotFoundError') {
+                    log('⚠️ No media devices found', 'warning');
+                } else if (error.name === 'NotReadableError') {
+                    log('⚠️ Media device is busy or unavailable', 'warning');
+                } else if (error.name === 'OverconstrainedError') {
+                    log('⚠️ Constraints not satisfied', 'warning');
+                } else if (error.name === 'TypeError') {
+                    log('⚠️ Invalid constraints or media device error', 'warning');
+                }
+            }
+        }
+
+        // Start test when DOM is loaded
+        document.addEventListener('DOMContentLoaded', () => {
+            log('DOM loaded, starting media stream test...');
+            testMediaStream();
+        });
+    </script>
+</body>
+</html>
