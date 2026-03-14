@@ -767,8 +767,6 @@ const ShuntCallWebRTC = {
   },
 
   getAvailableQualities() {
-
-  getAvailableQualities() {
     return Object.keys(this.videoQualityMap);
   },
 
