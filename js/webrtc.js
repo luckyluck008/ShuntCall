@@ -690,7 +690,7 @@ const ShuntCallWebRTC = {
     this.listeners[event].forEach(callback => callback(data));
   },
 
-  async setVideoQuality(quality) {
+  async setVideoQuality(quality, fallback = true) {
     const qualitySettings = this.videoQualityMap[quality];
     if (!qualitySettings) {
       console.error('Invalid video quality:', quality);
@@ -732,10 +732,41 @@ const ShuntCallWebRTC = {
       return true;
     } catch (error) {
       console.error('Failed to apply video quality:', error);
+      
+      if (fallback) {
+        const fallbackQualities = ['1080p', '720p', '480p'];
+        const currentIndex = fallbackQualities.indexOf(quality);
+        
+        for (let i = currentIndex + 1; i < fallbackQualities.length; i++) {
+          const fallbackQuality = fallbackQualities[i];
+          console.log('Trying fallback quality:', fallbackQuality);
+          const fallbackSettings = this.videoQualityMap[fallbackQuality];
+          
+          try {
+            const fallbackConstraints = {
+              width: { ideal: fallbackSettings.width },
+              height: { ideal: fallbackSettings.height },
+              frameRate: { ideal: 30 }
+            };
+            
+            await videoTrack.applyConstraints(fallbackConstraints);
+            this.currentVideoQuality = fallbackQuality;
+            
+            console.log('Fallback to', fallbackQuality, 'successful');
+            this.emit('videoQualityChanged', { quality: fallbackQuality, settings: fallbackSettings, originalQuality: quality });
+            return true;
+          } catch (fallbackError) {
+            console.warn('Fallback to', fallbackQuality, 'failed:', fallbackError);
+          }
+        }
+      }
+      
       this.emit('videoQualityError', { quality, error });
       return false;
     }
   },
+
+  getAvailableQualities() {
 
   getAvailableQualities() {
     return Object.keys(this.videoQualityMap);
