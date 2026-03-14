@@ -160,6 +160,13 @@ const ShuntCallWebRTC = {
         streamId: streams[0]?.id
       });
       
+      let remoteStream = streams[0];
+      if (!remoteStream) {
+        console.log('No streams in ontrack event - creating new stream for track');
+        remoteStream = new MediaStream();
+        remoteStream.addTrack(track);
+      }
+      
       // Add track error listener
       track.onended = () => {
         console.log('Remote track ended:', track.kind, remotePeerId.slice(0, 16));
@@ -183,13 +190,13 @@ const ShuntCallWebRTC = {
       // Emit both remoteStream and track events for flexibility
       this.emit('remoteStream', {
         peerId: remotePeerId,
-        stream: streams[0]
+        stream: remoteStream
       });
       
       this.emit('trackReceived', {
         peerId: remotePeerId,
         track,
-        stream: streams[0],
+        stream: remoteStream,
         kind: track.kind
       });
     };
