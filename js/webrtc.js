@@ -19,6 +19,15 @@ const ShuntCallWebRTC = {
     iceCandidatePoolSize: 10
   },
   listeners: {},
+  currentVideoQuality: '720p',
+  videoQualityMap: {
+    '480p': { width: 854, height: 480, bitrate: 2500000 },
+    '720p': { width: 1280, height: 720, bitrate: 5000000 },
+    '1080p': { width: 1920, height: 1080, bitrate: 8000000 },
+    '1440p': { width: 2560, height: 1440, bitrate: 16000000 },
+    '4k': { width: 3840, height: 2160, bitrate: 35000000 },
+    '8k': { width: 7680, height: 4320, bitrate: 80000000 }
+  },
 
   init(localStream, peerId, signaling) {
     this.localStream = localStream;
@@ -679,6 +688,65 @@ const ShuntCallWebRTC = {
   emit(event, data) {
     if (!this.listeners[event]) return;
     this.listeners[event].forEach(callback => callback(data));
+  },
+
+  async setVideoQuality(quality) {
+    const qualitySettings = this.videoQualityMap[quality];
+    if (!qualitySettings) {
+      console.error('Invalid video quality:', quality);
+      return false;
+    }
+
+    if (!this.localStream) {
+      console.warn('No local stream available');
+      return false;
+    }
+
+    const videoTrack = this.localStream.getVideoTracks()[0];
+    if (!videoTrack) {
+      console.warn('No video track available');
+      return false;
+    }
+
+    try {
+      const constraints = {
+        width: { ideal: qualitySettings.width },
+        height: { ideal: qualitySettings.height },
+        frameRate: { ideal: 30 }
+      };
+      
+      await videoTrack.applyConstraints(constraints);
+      this.currentVideoQuality = quality;
+      
+      Object.values(this.peerConnections).forEach(pc => {
+        const sender = pc.getSenders().find(s => s.track?.kind === 'video');
+        if (sender) {
+          sender.track.applyConstraints(constraints).catch(err => {
+            console.warn('Failed to apply constraints on sender:', err);
+          });
+        }
+      });
+
+      console.log('Video quality changed to:', quality, constraints);
+      this.emit('videoQualityChanged', { quality, settings: qualitySettings });
+      return true;
+    } catch (error) {
+      console.error('Failed to apply video quality:', error);
+      this.emit('videoQualityError', { quality, error });
+      return false;
+    }
+  },
+
+  getAvailableQualities() {
+    return Object.keys(this.videoQualityMap);
+  },
+
+  getCurrentQuality() {
+    return this.currentVideoQuality;
+  },
+
+  getQualitySettings(quality) {
+    return this.videoQualityMap[quality] || null;
   },
 
   destroy() {

@@ -148,7 +148,15 @@
                 <span class="text-[10px] text-neutral-500 block mb-1">LOCAL_NODE</span>
                 <span class="text-sm text-white">You</span>
               </div>
-              <div class="flex items-center gap-2">
+              <div class="flex items-center gap-3">
+                <select id="liveQualitySelector" class="bg-black/60 border border-neutral-600 text-neutral-300 text-[10px] font-mono px-2 py-1 rounded-sm focus:border-white focus:outline-none cursor-pointer">
+                  <option value="480p">480p</option>
+                  <option value="720p" selected>720p</option>
+                  <option value="1080p">1080p</option>
+                  <option value="1440p">1440p</option>
+                  <option value="4k">4K</option>
+                  <option value="8k">8K</option>
+                </select>
                 <span class="text-[10px] text-neutral-500 font-mono">TX/RX OK</span>
                 <span class="w-2 h-2 rounded-full bg-white shadow-[0_0_8px_rgba(255,255,255,0.8)]"></span>
               </div>
@@ -337,11 +345,12 @@
            const ourPubkey = this.signaling.nostr.keys.publicKey;
            console.log('Our pubkey:', ourPubkey.slice(0, 16) + '...');
 
-             // Initialize WebRTC
-             this.webrtc = ShuntCallWebRTC;
-             this.webrtc.init(this.localStream, ourPubkey, this.signaling);
-             
-             // Initialize Relay Tree
+              // Initialize WebRTC
+              this.webrtc = ShuntCallWebRTC;
+              this.webrtc.init(this.localStream, ourPubkey, this.signaling);
+              this.webrtc.setVideoQuality(this.mediaOptions.videoQuality);
+              
+              // Initialize Relay Tree
              this.relayTree = ShuntCallRelayTree;
              this.relayTree.init(ourPubkey, this.webrtc);
              
@@ -492,10 +501,21 @@
               throw new Error('At least one media type (audio or video) must be enabled.');
             }
 
+            const qualityMap = {
+              '480p': { width: 854, height: 480 },
+              '720p': { width: 1280, height: 720 },
+              '1080p': { width: 1920, height: 1080 },
+              '1440p': { width: 2560, height: 1440 },
+              '4k': { width: 3840, height: 2160 },
+              '8k': { width: 7680, height: 4320 }
+            };
+            const quality = this.mediaOptions.videoQuality || '720p';
+            const videoSettings = qualityMap[quality] || qualityMap['720p'];
+
             this.localStream = await navigator.mediaDevices.getUserMedia({
               video: this.mediaOptions.video ? {
-                width: { ideal: 1280 },
-                height: { ideal: 720 },
+                width: { ideal: videoSettings.width },
+                height: { ideal: videoSettings.height },
                 frameRate: { ideal: 30 }
               } : false,
               audio: this.mediaOptions.audio ? {
@@ -578,16 +598,27 @@
              
              <p class="text-neutral-400 text-sm mb-6">Configure transmission parameters:</p>
 
-             <div class="space-y-4 mb-8 font-mono text-sm">
-               <label class="flex items-center gap-4 cursor-pointer group">
-                 <input type="checkbox" id="enableVideo" checked class="w-4 h-4 accent-white bg-black border-neutral-600">
-                 <span class="text-neutral-300 group-hover:text-white transition-colors">Video Transmission</span>
-               </label>
-               <label class="flex items-center gap-4 cursor-pointer group">
-                 <input type="checkbox" id="enableAudio" checked class="w-4 h-4 accent-white bg-black border-neutral-600">
-                 <span class="text-neutral-300 group-hover:text-white transition-colors">Audio Transmission</span>
-               </label>
-             </div>
+              <div class="space-y-4 mb-8 font-mono text-sm">
+                <label class="flex items-center gap-4 cursor-pointer group">
+                  <input type="checkbox" id="enableVideo" checked class="w-4 h-4 accent-white bg-black border-neutral-600">
+                  <span class="text-neutral-300 group-hover:text-white transition-colors">Video Transmission</span>
+                </label>
+                <label class="flex items-center gap-4 cursor-pointer group">
+                  <input type="checkbox" id="enableAudio" checked class="w-4 h-4 accent-white bg-black border-neutral-600">
+                  <span class="text-neutral-300 group-hover:text-white transition-colors">Audio Transmission</span>
+                </label>
+                <div id="videoQualityContainer" class="ml-8 mt-2">
+                  <label class="text-neutral-500 text-xs mb-2 block">Resolution:</label>
+                  <select id="videoQuality" class="w-full bg-black border border-neutral-600 text-neutral-300 text-sm px-3 py-2 rounded-sm focus:border-white focus:outline-none">
+                    <option value="480p">480p (854×480)</option>
+                    <option value="720p" selected>720p (1280×720)</option>
+                    <option value="1080p">1080p (1920×1080)</option>
+                    <option value="1440p">1440p (2560×1440)</option>
+                    <option value="4k">4K (3840×2160)</option>
+                    <option value="8k">8K (7680×4320)</option>
+                  </select>
+                </div>
+              </div>
 
              <div class="flex gap-3">
                <button id="mediaPermissionAccept" class="btn-solid flex-1 py-3 text-xs font-semibold uppercase tracking-wider rounded-sm">
@@ -602,18 +633,24 @@
          
          document.body.appendChild(modal);
          
-         this.mediaOptions = {
-           video: true,
-           audio: true
-         };
-         
-         document.getElementById('enableVideo').addEventListener('change', (e) => {
-           this.mediaOptions.video = e.target.checked;
-         });
-         
-         document.getElementById('enableAudio').addEventListener('change', (e) => {
-           this.mediaOptions.audio = e.target.checked;
-         });
+          this.mediaOptions = {
+            video: true,
+            audio: true,
+            videoQuality: '720p'
+          };
+          
+          document.getElementById('enableVideo').addEventListener('change', (e) => {
+            this.mediaOptions.video = e.target.checked;
+            document.getElementById('videoQualityContainer').style.display = e.target.checked ? 'block' : 'none';
+          });
+          
+          document.getElementById('enableAudio').addEventListener('change', (e) => {
+            this.mediaOptions.audio = e.target.checked;
+          });
+          
+          document.getElementById('videoQuality').addEventListener('change', (e) => {
+            this.mediaOptions.videoQuality = e.target.value;
+          });
          
          document.getElementById('mediaPermissionAccept').addEventListener('click', () => {
            modal.remove();
@@ -826,6 +863,21 @@
           } else {
             btn.classList.remove('active', 'bg-white', 'text-black');
             btn.classList.add('bg-transparent', 'text-white');
+          }
+        });
+
+        document.getElementById('liveQualitySelector').addEventListener('change', async (e) => {
+          const quality = e.target.value;
+          console.log('Changing video quality to:', quality);
+          if (this.webrtc) {
+            const success = await this.webrtc.setVideoQuality(quality);
+            if (success) {
+              this.mediaOptions.videoQuality = quality;
+              console.log('Video quality changed successfully to:', quality);
+            } else {
+              console.error('Failed to change video quality to:', quality);
+              e.target.value = this.mediaOptions.videoQuality || '720p';
+            }
           }
         });
 
