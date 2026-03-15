@@ -483,9 +483,8 @@
           }
 
           // Show media permission prompt
-          this.showMediaPermissionModal();
-          
           await this.detectWebcamCapabilities();
+          this.showMediaPermissionModal();
           
           // Wait for user to confirm
           await new Promise((resolve, reject) => {
