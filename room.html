@@ -342,7 +342,7 @@
               // Initialize WebRTC
               this.webrtc = ShuntCallWebRTC;
               this.webrtc.init(this.localStream, ourPubkey, this.signaling);
-              this.webrtc.setVideoQuality(this.mediaOptions.videoQuality);
+              this.webrtc.setVideoQuality(this.mediaOptions?.videoQuality || '720p');
               
               this.populateLiveQualitySelector();
               
@@ -482,8 +482,9 @@
             throw new Error('System requires HTTPS or localhost for media access.');
           }
 
+          this.supportedQualities = ['480p', '720p', '1080p', '1440p', '4k', '8k'];
+          
           // Show media permission prompt
-          await this.detectWebcamCapabilities();
           this.showMediaPermissionModal();
           
           // Wait for user to confirm
@@ -562,6 +563,10 @@
                   });
                   
                   console.log(`Media tracks: ${audioTracks.length} audio, ${videoTracks.length} video`);
+                  
+                  this.detectWebcamCapabilities().then(() => {
+                    this.populateLiveQualitySelector();
+                  });
                 } else {
                   console.warn('Mock stream detected - skipping srcObject assignment');
                 }
