@@ -585,6 +585,36 @@
         },
 
         async detectWebcamCapabilities() {
+          if (this.localStream && this.localStream.getVideoTracks().length > 0) {
+            try {
+              const videoTrack = this.localStream.getVideoTracks()[0];
+              const settings = videoTrack.getSettings();
+              
+              this.webcamCapabilities = {
+                width: settings.width || 1920,
+                height: settings.height || 1080,
+                frameRate: settings.frameRate || 30
+              };
+              
+              console.log('Webcam capabilities from existing stream:', this.webcamCapabilities);
+              
+              const qualityOrder = ['8k', '4k', '1440p', '1080p', '720p', '480p'];
+              const widthMap = { '480p': 854, '720p': 1280, '1080p': 1920, '1440p': 2560, '4k': 3840, '8k': 7680 };
+              
+              this.supportedQualities = qualityOrder.filter(q => widthMap[q] <= (this.webcamCapabilities.width || 1920));
+              
+              if (this.supportedQualities.length === 0) {
+                this.supportedQualities = ['480p'];
+              }
+              
+              console.log('Supported qualities (from stream):', this.supportedQualities);
+            } catch (error) {
+              console.warn('Error detecting capabilities from stream:', error);
+              this.supportedQualities = ['480p', '720p', '1080p', '1440p', '4k', '8k'];
+            }
+            return;
+          }
+          
           try {
             const testStream = await navigator.mediaDevices.getUserMedia({
               video: { width: { ideal: 3840 }, height: { ideal: 2160 } },
