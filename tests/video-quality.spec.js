@@ -119,22 +119,22 @@ test.describe('Video Quality Tests', () => {
     expect(hasVideoQualityMap).toBe(true);
   });
 
-  test('detectWebcamCapabilities is called before showMediaPermissionModal', async () => {
+  test('supportedQualities is set before showMediaPermissionModal', async () => {
     const roomPath = path.join(process.cwd(), 'room.html');
     const roomContent = fs.readFileSync(roomPath, 'utf-8');
     
-    const detectIndex = roomContent.indexOf('await this.detectWebcamCapabilities()');
+    const supportedQualitiesIndex = roomContent.indexOf("this.supportedQualities = ['480p', '720p', '1080p', '1440p', '4k', '8k']");
     const showModalIndex = roomContent.indexOf('this.showMediaPermissionModal()');
     
     console.log('Order verification:', {
-      detectIndex,
+      supportedQualitiesIndex,
       showModalIndex,
-      correctOrder: detectIndex < showModalIndex
+      correctOrder: supportedQualitiesIndex > 0 && supportedQualitiesIndex < showModalIndex
     });
     
-    expect(detectIndex).toBeGreaterThan(0);
+    expect(supportedQualitiesIndex).toBeGreaterThan(0);
     expect(showModalIndex).toBeGreaterThan(0);
-    expect(detectIndex).toBeLessThan(showModalIndex);
+    expect(supportedQualitiesIndex).toBeLessThan(showModalIndex);
   });
 
   test('room.html contains video quality selector UI', async () => {
