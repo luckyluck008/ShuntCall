@@ -605,22 +605,16 @@ test.describe('Nickname Hot-Reload', () => {
 
 test.describe('File Sharing Fix', () => {
 
-  test('sendFile uses safe 4KB chunks', async ({ page }) => {
-    await page.goto('/');
-    const resp = await page.goto('/room.html?room=dummy');
+  test('sendFile uses safe 4KB chunks', async ({ page, request }) => {
+    const resp = await request.get('/room.html');
     const code = await resp.text();
-    expect(code).toContain('const CHUNK_SIZE = 4096');
+    expect(code).toContain('CHUNK_SIZE = 4096');
   });
 
-  test('sendFile has delay between chunks', async ({ page }) => {
-    await page.goto('/');
-    const resp = await page.goto('/room.html?room=dummy');
+  test('sendFile has delay between chunks', async ({ page, request }) => {
+    const resp = await request.get('/room.html');
     const code = await resp.text();
-    // Should have setTimeout for chunk pacing
-    const sendFileSection = code.substring(
-      code.indexOf('sendFile(file)'),
-      code.indexOf('handleFileOffer(peerId')
-    );
+    const sendFileSection = code.substring(code.indexOf('sendFile(file)'), code.indexOf('handleFileOffer(peerId'));
     expect(sendFileSection).toContain('setTimeout');
   });
 
@@ -638,21 +632,15 @@ test.describe('File Sharing Fix', () => {
     expect(btn).not.toBeNull();
   });
 
-  test('sendFile logs error when no peers connected', async ({ page }) => {
-    const logs = [];
-    page.on('console', msg => logs.push(msg.text()));
-    const roomLogs = await setupRoom(page, ROOM_ID + '-file-nopeer', PASSWORD);
-    
-    // Try to trigger sendFile via the file input (simulated)
-    const hasInit = roomLogs.some(l => l.includes('Signaling initialized'));
+  test('sendFile shows file card when no peers connected', async ({ page }) => {
+    const logs = await setupRoom(page, ROOM_ID + '-file-nopeer', PASSWORD);
+    const hasInit = logs.some(l => l.includes('Signaling initialized'));
     expect(hasInit).toBe(true);
     
-    // sendFile should show a message in chat when no peers
-    // We can verify by checking the code handles the zero-peer case
     const resp = await page.goto('/room.html?room=dummy');
     const code = await resp.text();
-    expect(code).toContain('openChannels.length === 0');
-    expect(code).toContain('FILE_QUEUED');
+    expect(code).toContain('addFileCard');
+    expect(code).toContain('queued');
   });
 
   test('dataChannelOpen auto-dequeues pending file', async ({ page, request }) => {
@@ -660,6 +648,28 @@ test.describe('File Sharing Fix', () => {
     const code = await resp.text();
     expect(code).toContain('_pendingFile');
     expect(code).toContain('FILE_DEQUEUED');
+  });
+
+  test('handleFileChunk uses Set for reliable chunk tracking', async ({ page, request }) => {
+    const resp = await request.get('/room.html');
+    const code = await resp.text();
+    expect(code).toContain('receivedIndices: new Set()');
+    expect(code).toContain('transfer.receivedIndices.add');
+    expect(code).toContain('receivedIndices.size >= transfer.totalChunks');
+  });
+
+  test('file card has download button on completion', async ({ page, request }) => {
+    const resp = await request.get('/room.html');
+    const code = await resp.text();
+    expect(code).toContain('updateFileCardDownload');
+    expect(code).toContain('link.download = fileName');
+  });
+
+  test('file card shows progress bar', async ({ page, request }) => {
+    const resp = await request.get('/room.html');
+    const code = await resp.text();
+    expect(code).toContain('file-progress-bar');
+    expect(code).toContain('updateFileCardProgress');
   });
 });
 

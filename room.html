@@ -1660,7 +1660,7 @@
        sendFile(file) {
           if (!file) return;
           if (!this.webrtc) {
-            this.addChatMessage('self', '[File send failed: WebRTC not initialized]', new Date().toISOString().split('T')[1].split('.')[0]);
+            this.addFileCard('self', file.name, file.size, file.type, 'error', 'WebRTC not initialized');
             return;
           }
           
@@ -1669,39 +1669,29 @@
             .filter(([, dc]) => dc.readyState === 'open');
           
           if (openChannels.length === 0) {
-            this.addChatMessage('self', `[File "${file.name}" queued — waiting for peers to connect]`, new Date().toISOString().split('T')[1].split('.')[0]);
-            this.addDebugMessage(`FILE_QUEUED: ${file.name} (no peers connected)`);
-            
-            // Queue file to send when a peer connects
+            this.addFileCard('self', file.name, file.size, file.type, 'queued', 'Waiting for peers...');
             this._pendingFile = file;
             return;
           }
           
-          // Calculate safe chunk size
           const CHUNK_SIZE = 4096;
-          
           const fileId = crypto.getRandomValues(new Uint8Array(8)).reduce((s, b) => s + b.toString(16).padStart(2, '0'), '');
-          
           const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
-          const fileData = {
+          
+          // Show sending card in chat
+          this.addFileCard('self', file.name, file.size, file.type, 'sending', '0%', fileId);
+          
+          // Send file offer
+          this.webrtc.broadcastData({
+            type: 'file-offer',
             id: fileId,
             name: file.name,
             size: file.size,
             type: file.type,
             chunks: totalChunks
-          };
+          });
           
-          // Broadcast file offer to all peers
-          const offerSent = this.webrtc.broadcastData({ type: 'file-offer', ...fileData });
-          this.addDebugMessage(`FILE_OFFER: ${file.name} → ${offerSent} peer(s)`);
-          this.addChatMessage('self', `Sharing file: ${file.name} (${(file.size / 1024).toFixed(1)} KB, ${totalChunks} chunks) to ${offerSent} peer(s)`, new Date().toISOString().split('T')[1].split('.')[0]);
-          
-          if (offerSent === 0) {
-            this.addChatMessage('self', `[No peers received the file offer]`, new Date().toISOString().split('T')[1].split('.')[0]);
-            return;
-          }
-          
-          // Read and send file in chunks with delay to avoid overwhelming DataChannel
+          // Read and send chunks
           const reader = new FileReader();
           let offset = 0;
           let chunkIndex = 0;
@@ -1721,23 +1711,26 @@
             chunkIndex++;
             offset += CHUNK_SIZE;
             
+            // Update progress bar
+            const pct = Math.min(100, Math.round((offset / file.size) * 100));
+            this.updateFileCardProgress(fileId, pct + '%');
+            
             if (offset < file.size) {
               setTimeout(() => readSlice(offset), 50);
             } else {
+              this.updateFileCardProgress(fileId, 'Sent');
               this.addDebugMessage(`FILE_SENT: ${file.name} (${chunkIndex} chunks)`);
             }
           };
           
-          reader.onerror = (err) => {
-            console.error('FileReader error:', err);
+          reader.onerror = () => {
+            this.updateFileCardProgress(fileId, 'Error');
             this.addDebugMessage(`FILE_ERROR: Failed to read ${file.name}`);
           };
           
           const readSlice = (off) => {
-            const slice = file.slice(off, Math.min(off + CHUNK_SIZE, file.size));
-            reader.readAsArrayBuffer(slice);
+            reader.readAsArrayBuffer(file.slice(off, Math.min(off + CHUNK_SIZE, file.size)));
           };
-          
           readSlice(0);
         },
 
@@ -1745,54 +1738,134 @@
           this.fileTransfers.set(data.id, {
             meta: data,
             peerId,
-            chunks: [],
-            received: 0
+            chunks: new Array(data.chunks),
+            receivedIndices: new Set(),
+            totalChunks: data.chunks
           });
-          this.addChatMessage(peerId, `Sharing file: ${data.name} (${(data.size / 1024).toFixed(1)} KB)`, new Date().toISOString().split('T')[1].split('.')[0]);
+          // Show receiving card
+          this.addFileCard(peerId, data.name, data.size, data.type, 'receiving', '0%', data.id);
         },
 
         handleFileChunk(peerId, data) {
           const transfer = this.fileTransfers.get(data.id);
           if (!transfer) return;
+          
           transfer.chunks[data.index] = data.data;
-          transfer.received++;
+          transfer.receivedIndices.add(data.index);
+          
+          // Update progress
+          const pct = Math.round((transfer.receivedIndices.size / transfer.totalChunks) * 100);
+          this.updateFileCardProgress(data.id, pct + '%');
           
           if (data.last) {
-            // Reassemble file — chunks are base64-encoded, decode before byte extraction
-            const base64Str = transfer.chunks.join('');
-            const binaryStr = atob(base64Str);
-            const bytes = new Uint8Array(binaryStr.length);
-            for (let i = 0; i < binaryStr.length; i++) {
-              bytes[i] = binaryStr.charCodeAt(i);
+            transfer.lastChunkReceived = true;
+          }
+          
+          // Check if all chunks received (last chunk arrived + all indices present)
+          if (transfer.lastChunkReceived && transfer.receivedIndices.size >= transfer.totalChunks) {
+            // Reassemble
+            try {
+              const base64Str = transfer.chunks.join('');
+              const binaryStr = atob(base64Str);
+              const bytes = new Uint8Array(binaryStr.length);
+              for (let i = 0; i < binaryStr.length; i++) {
+                bytes[i] = binaryStr.charCodeAt(i);
+              }
+              const blob = new Blob([bytes], { type: transfer.meta.type || 'application/octet-stream' });
+              const url = URL.createObjectURL(blob);
+              
+              // Update card to show download button
+              this.updateFileCardDownload(data.id, url, transfer.meta.name, transfer.meta.size);
+              this.fileTransfers.delete(data.id);
+              this.addDebugMessage(`FILE_RECEIVED: ${transfer.meta.name} (${bytes.length} bytes)`);
+            } catch (err) {
+              this.updateFileCardProgress(data.id, 'Error');
+              this.addDebugMessage(`FILE_REASSEMBLY_ERROR: ${err.message}`);
+              console.error('File reassembly error:', err);
             }
-            const blob = new Blob([bytes], { type: transfer.meta.type });
-            const url = URL.createObjectURL(blob);
-            
-            // Show download link in chat
-            const time = new Date().toISOString().split('T')[1].split('.')[0];
-            const safeName = this.escapeHtml(transfer.meta.name);
-            const safeUrl = url; // blob: URLs are safe
-            const container = document.getElementById('chatMessages');
-            if (container) {
-              const div = document.createElement('div');
-              div.className = 'mb-2';
-              const link = document.createElement('a');
-              link.href = safeUrl;
-              link.download = transfer.meta.name;
-              link.className = 'underline text-blue-400 hover:text-blue-300';
-              link.textContent = safeName;
-              const wrapper = document.createElement('div');
-              wrapper.className = 'text-sm text-neutral-300 bg-neutral-900 inline-block px-3 py-1.5 rounded-sm mt-0.5';
-              wrapper.textContent = 'File ready: ';
-              wrapper.appendChild(link);
-              div.innerHTML = `<span class="text-[10px] text-neutral-500 font-mono">${time} ${peerId.slice(0, 8)}...</span>`;
-              div.appendChild(wrapper);
-              container.appendChild(div);
-              container.scrollTop = container.scrollHeight;
-            }
-            
-            this.fileTransfers.delete(data.id);
-            this.addDebugMessage(`FILE_RECEIVED: ${transfer.meta.name}`);
+          }
+        },
+
+        addFileCard(peerId, fileName, fileSize, fileType, status, statusText, fileId) {
+          const container = document.getElementById('chatMessages');
+          if (!container) return;
+          
+          const time = new Date().toISOString().split('T')[1].split('.')[0];
+          const isSelf = peerId === 'self';
+          const label = isSelf ? (this.nickname || 'You') : (this.peerNicknames.get(peerId) || peerId.slice(0, 8) + '...');
+          const safeName = this.escapeHtml(fileName);
+          const sizeStr = fileSize > 1048576 ? (fileSize / 1048576).toFixed(1) + ' MB' : (fileSize / 1024).toFixed(1) + ' KB';
+          
+          // File type icon
+          const ext = fileName.split('.').pop()?.toLowerCase() || '';
+          const iconMap = { mp3: '♪', wav: '♪', mp4: '▶', mov: '▶', avi: '▶', pdf: '📄', zip: '📦', rar: '📦', png: '🖼', jpg: '🖼', jpeg: '🖼', gif: '🖼', svg: '🖼', doc: '📝', docx: '📝', txt: '📝' };
+          const icon = iconMap[ext] || '📎';
+          
+          const div = document.createElement('div');
+          div.className = `mb-3 ${isSelf ? 'text-right' : ''}`;
+          div.id = fileId ? `file-card-${fileId}` : undefined;
+          
+          const statusColor = status === 'sending' || status === 'receiving' ? 'text-blue-400' : status === 'done' ? 'text-green-400' : status === 'error' ? 'text-red-400' : 'text-neutral-400';
+          const barVisible = status === 'sending' || status === 'receiving';
+          
+          div.innerHTML = `
+            <span class="text-[10px] text-neutral-500 font-mono">${time} ${this.escapeHtml(label)}</span>
+            <div class="inline-block max-w-[85%] mt-0.5 rounded-sm border border-neutral-800 bg-neutral-900/80 p-3 text-left">
+              <div class="flex items-center gap-3">
+                <span class="text-xl">${icon}</span>
+                <div class="flex-1 min-w-0">
+                  <div class="text-sm text-white truncate max-w-[200px]">${safeName}</div>
+                  <div class="text-[10px] text-neutral-500 font-mono">${sizeStr}</div>
+                </div>
+              </div>
+              ${barVisible ? `
+              <div class="mt-2 h-1 bg-neutral-800 rounded-full overflow-hidden">
+                <div class="file-progress-bar h-full bg-blue-500 transition-all duration-200" style="width:0%"></div>
+              </div>
+              <div class="text-[10px] font-mono ${statusColor} mt-1 file-status">${statusText}</div>
+              ` : `
+              <div class="text-[10px] font-mono ${statusColor} mt-1 file-status">${statusText}</div>
+              `}
+            </div>
+          `;
+          
+          container.appendChild(div);
+          container.scrollTop = container.scrollHeight;
+        },
+
+        updateFileCardProgress(fileId, text) {
+          const card = document.getElementById(`file-card-${fileId}`);
+          if (!card) return;
+          const statusEl = card.querySelector('.file-status');
+          const bar = card.querySelector('.file-progress-bar');
+          if (statusEl) statusEl.textContent = text;
+          if (bar) {
+            const num = parseInt(text);
+            if (!isNaN(num)) bar.style.width = num + '%';
+          }
+        },
+
+        updateFileCardDownload(fileId, url, fileName, fileSize) {
+          const card = document.getElementById(`file-card-${fileId}`);
+          if (!card) return;
+          
+          const statusEl = card.querySelector('.file-status');
+          const bar = card.querySelector('.file-progress-bar');
+          
+          if (bar) {
+            bar.style.width = '100%';
+            bar.classList.remove('bg-blue-500');
+            bar.classList.add('bg-green-500');
+          }
+          
+          if (statusEl) {
+            statusEl.innerHTML = '';
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = fileName;
+            link.className = 'text-green-400 hover:text-green-300 font-mono underline';
+            link.textContent = '↓ Download';
+            statusEl.appendChild(link);
           }
         },
 
