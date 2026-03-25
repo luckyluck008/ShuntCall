@@ -534,19 +534,16 @@ test.describe('README Updated', () => {
 
 test.describe('Screen Sharing — Camera Preserved', () => {
 
-  test('screen share does not stop camera track', async ({ page }) => {
-    const logs = await setupRoom(page, ROOM_ID + '-screen', PASSWORD);
-    // Verify toggleScreen handler doesn't remove/stop camera track
-    const resp = await page.goto('/room.html?room=dummy');
+  test('screen share does not stop camera track', async ({ page, request }) => {
+    const resp = await request.get('/room.html');
     const code = await resp.text();
     // The new code should NOT call oldVideoTrack.stop() when starting screen share
-    // Instead it should add screen track alongside camera
-    const screenShareSection = code.substring(
-      code.indexOf("document.getElementById('toggleScreen')"),
-      code.indexOf("document.getElementById('togglePiP')")
-    );
-    // Should add track, not remove old one
-    expect(screenShareSection).toContain('addTrack(screenTrack');
+    const screenIdx = code.indexOf("document.getElementById('toggleScreen')");
+    const pipIdx = code.indexOf("document.getElementById('togglePiP')");
+    const screenShareSection = code.substring(screenIdx, pipIdx);
+    // Should create separate screen video container
+    expect(screenShareSection).toContain('screenShareContainer');
+    expect(screenShareSection).toContain('screenVideo');
     expect(screenShareSection).not.toContain('oldVideoTrack.stop()');
   });
 

@@ -1753,7 +1753,7 @@
         document.getElementById('toggleScreen').addEventListener('click', async () => {
           try {
             if (this.isScreenSharing) {
-              // Stop screen sharing — camera stays alive, just remove screen track
+              // Stop screen sharing
               this.isScreenSharing = false;
               if (this.screenTrack) {
                 this.screenTrack.stop();
@@ -1772,13 +1772,18 @@
                 });
               }
               
-              // Update local preview back to camera only
+              // Remove screen share video element
+              const screenVideo = document.getElementById('screenVideo');
+              if (screenVideo) screenVideo.parentElement.remove();
+              
+              // Show camera in local preview again
               document.getElementById('localVideo').srcObject = this.localStream;
+              document.getElementById('localContainer').classList.remove('hidden');
               document.getElementById('toggleScreen').classList.remove('bg-white', 'text-black');
               return;
             }
             
-            // Start screen sharing — add as additional track, keep camera alive
+            // Start screen sharing — camera stays alive
             const screenStream = await navigator.mediaDevices.getDisplayMedia({
               video: { cursor: 'always' },
               audio: false
@@ -1797,29 +1802,49 @@
               });
             }
             
-            document.getElementById('localVideo').srcObject = this.localStream;
+            // Create a separate video element for screen share in the video grid
+            const grid = document.getElementById('videoGrid');
+            const screenContainer = document.createElement('div');
+            screenContainer.id = 'screenShareContainer';
+            screenContainer.className = 'relative bg-neutral-900 border border-neutral-800 aspect-video group overflow-hidden rounded-sm col-span-full';
+            screenContainer.innerHTML = `
+              <video id="screenVideo" autoplay muted playsinline class="w-full h-full object-contain bg-black"></video>
+              <div class="absolute top-3 right-3 flex items-center gap-2 bg-black/80 border border-neutral-700 px-3 py-1.5 rounded-sm backdrop-blur-md">
+                <span class="w-2 h-2 bg-red-500 rounded-full animate-pulse"></span>
+                <span class="text-[10px] font-mono text-white uppercase tracking-wider">Screen Share</span>
+              </div>
+              <div class="absolute inset-x-0 bottom-0 p-4 video-overlay flex justify-between items-end opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                <span class="text-[10px] text-neutral-400 font-mono">Camera is still active and streaming to peers</span>
+              </div>
+            `;
+            grid.insertBefore(screenContainer, grid.firstChild);
+            
+            // Show screen in the new video element
+            const screenVideo = document.getElementById('screenVideo');
+            screenVideo.srcObject = screenStream;
+            
+            // Button highlight
             document.getElementById('toggleScreen').classList.add('bg-white', 'text-black');
             
-            // Handle browser-native screen share stop
-            screenTrack.onended = async () => {
-              this.isScreenSharing = false;
-              this.screenTrack = null;
-              
-              // Remove screen track from local stream (camera stays)
-              this.localStream.removeTrack(screenTrack);
-              
-              // Remove screen track from all peer connections
-              if (this.webrtc) {
-                Object.values(this.webrtc.peerConnections).forEach(pc => {
-                  const screenSender = pc.getSenders().find(s => s.track === screenTrack);
-                  if (screenSender) {
-                    pc.removeTrack(screenSender);
-                  }
-                });
+            // Handle browser-native screen share stop button
+            screenTrack.onended = () => {
+              if (this.isScreenSharing) {
+                this.isScreenSharing = false;
+                this.screenTrack = null;
+                this.localStream.removeTrack(screenTrack);
+                
+                if (this.webrtc) {
+                  Object.values(this.webrtc.peerConnections).forEach(pc => {
+                    const s = pc.getSenders().find(s => s.track === screenTrack);
+                    if (s) pc.removeTrack(s);
+                  });
+                }
+                
+                const el = document.getElementById('screenShareContainer');
+                if (el) el.remove();
+                document.getElementById('localVideo').srcObject = this.localStream;
+                document.getElementById('toggleScreen').classList.remove('bg-white', 'text-black');
               }
-              
-              document.getElementById('localVideo').srcObject = this.localStream;
-              document.getElementById('toggleScreen').classList.remove('bg-white', 'text-black');
             };
           } catch (error) {
             console.error('Screen share error:', error);
