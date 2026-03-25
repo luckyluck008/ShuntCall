@@ -5,7 +5,7 @@
 
 const RELAY_CONFIG = {
   maxChildren: 3,
-  bandwidthCheckInterval: 5000,
+  bandwidthCheckInterval: 10000,
   treeReorgInterval: 30000,
   relayThreshold: 2 * 1024 * 1024,
   forwardCanvasWidth: 640,
@@ -195,15 +195,20 @@ const ShuntCallRelayTree = {
       forwardStream.addTrack(audioTracks[0]);
     }
     
-    // Animation loop to draw video frames to canvas
+    // Animation loop to draw video frames to canvas (throttled to forwardFrameRate)
     let animId = null;
-    const drawFrame = () => {
-      if (video.readyState >= video.HAVE_CURRENT_DATA) {
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const frameInterval = 1000 / RELAY_CONFIG.forwardFrameRate;
+    let lastFrameTime = 0;
+    const drawFrame = (timestamp) => {
+      if (timestamp - lastFrameTime >= frameInterval) {
+        lastFrameTime = timestamp;
+        if (video.readyState >= video.HAVE_CURRENT_DATA) {
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        }
       }
       animId = requestAnimationFrame(drawFrame);
     };
-    video.onloadeddata = () => drawFrame();
+    video.onloadeddata = () => requestAnimationFrame(drawFrame);
     
     this.forwardedStreams[sourcePeerId] = {
       stream: forwardStream,

@@ -746,7 +746,7 @@
             {
               name: 'PBKDF2',
               salt: new TextEncoder().encode('shuntcall-e2e-' + this.roomId),
-              iterations: 100000,
+              iterations: 60000,
               hash: 'SHA-256'
             },
             keyMaterial,
@@ -1605,7 +1605,8 @@
          const msgObj = { peerId, message, timestamp: time, expiresAt: expiresAt || null };
          this.chatMessages.push(msgObj);
          if (expiresAt) this.scheduleExpiry(msgObj);
-         this.renderChatMessages();
+         // Incremental: only append the new message to DOM
+         this.appendChatMessage(msgObj);
          if (!this.chatOpen) {
            const badge = document.getElementById('chatBadge');
            if (badge) {
@@ -1613,6 +1614,19 @@
              badge.textContent = parseInt(badge.textContent || '0') + 1;
            }
          }
+       },
+
+       appendChatMessage(msg) {
+         const container = document.getElementById('chatMessages');
+         if (!container) return;
+         const isSelf = msg.peerId === 'self';
+         const label = isSelf ? (this.nickname || 'You') : (this.peerNicknames.get(msg.peerId) || msg.peerId.slice(0, 8) + '...');
+         const div = document.createElement('div');
+         div.className = `mb-2 ${isSelf ? 'text-right' : ''}`;
+         div.innerHTML = `<span class="text-[10px] text-neutral-500 font-mono">${msg.timestamp} ${this.escapeHtml(label)}</span>
+           <div class="text-sm ${isSelf ? 'text-white bg-white/10' : 'text-neutral-300 bg-neutral-900'} inline-block px-3 py-1.5 rounded-sm mt-0.5 max-w-[85%] break-words">${this.escapeHtml(msg.message)}</div>`;
+         container.appendChild(div);
+         container.scrollTop = container.scrollHeight;
        },
 
        scheduleExpiry(msgObj) {
@@ -1629,34 +1643,30 @@
        },
 
        async sendChatMessage(message) {
-          if (!message.trim()) return;
-          const timestamp = new Date().toISOString().split('T')[1].split('.')[0];
-          const encryptedMessage = await this.encryptMessage(message.trim());
-          if (!encryptedMessage) {
-            this.addChatMessage('self', '[Message not sent: encryption failed]', timestamp);
-            return;
-          }
-          const expiry = this.chatExpiry;
-          const data = { type: 'chat', message: encryptedMessage, timestamp, expiry };
-          this.webrtc.broadcastData(data);
-          const msgObj = { peerId: 'self', message: message.trim(), timestamp, expiresAt: expiry > 0 ? Date.now() + expiry * 1000 : null };
-          this.chatMessages.push(msgObj);
-          if (expiry > 0) this.scheduleExpiry(msgObj);
-          this.renderChatMessages();
-        },
+         if (!message.trim()) return;
+         const timestamp = new Date().toISOString().split('T')[1].split('.')[0];
+         const encryptedMessage = await this.encryptMessage(message.trim());
+         if (!encryptedMessage) {
+           this.addChatMessage('self', '[Message not sent: encryption failed]', timestamp);
+           return;
+         }
+         const expiry = this.chatExpiry;
+         const data = { type: 'chat', message: encryptedMessage, timestamp, expiry };
+         this.webrtc.broadcastData(data);
+         const msgObj = { peerId: 'self', message: message.trim(), timestamp, expiresAt: expiry > 0 ? Date.now() + expiry * 1000 : null };
+         this.chatMessages.push(msgObj);
+         if (expiry > 0) this.scheduleExpiry(msgObj);
+         // Incremental append instead of full rebuild
+         this.appendChatMessage(msgObj);
+       },
 
+       // Full rebuild — only for nickname changes, clear, or expiry
        renderChatMessages() {
          const container = document.getElementById('chatMessages');
          if (!container) return;
          container.innerHTML = this.chatMessages.map(msg => {
            const isSelf = msg.peerId === 'self';
-           // Look up current nickname dynamically (hot-reloadable)
-           let label;
-           if (isSelf) {
-             label = this.nickname || 'You';
-           } else {
-             label = this.peerNicknames.get(msg.peerId) || msg.peerId.slice(0, 8) + '...';
-           }
+           const label = isSelf ? (this.nickname || 'You') : (this.peerNicknames.get(msg.peerId) || msg.peerId.slice(0, 8) + '...');
            return `<div class="mb-2 ${isSelf ? 'text-right' : ''}">
              <span class="text-[10px] text-neutral-500 font-mono">${msg.timestamp} ${this.escapeHtml(label)}</span>
              <div class="text-sm ${isSelf ? 'text-white bg-white/10' : 'text-neutral-300 bg-neutral-900'} inline-block px-3 py-1.5 rounded-sm mt-0.5 max-w-[85%] break-words">${this.escapeHtml(msg.message)}</div>
@@ -2204,24 +2214,32 @@
           this.chatExpiry = parseInt(e.target.value) || 0;
         });
 
-        // Start connection quality polling
-        this._qualityInterval = setInterval(() => {
-          this.updateConnectionQualityDisplay();
-        }, 5000);
-
-        // Auto quality adjustment every 20 seconds
-        this._autoQualityInterval = setInterval(async () => {
-          if (this.webrtc && this.peers.size > 0) {
+        // Combined stats polling (quality display + auto-adjust) — single interval
+        this._statsInterval = setInterval(async () => {
+          if (this.peers.size === 0) return;
+          // Quality display
+          for (const [peerId] of this.peers) {
+            const stats = await this.getConnectionStats(peerId);
+            if (!stats) continue;
+            const el = document.getElementById(`quality-${peerId}`);
+            if (el && stats.roundTripTime !== null) {
+              const ms = Math.round(stats.roundTripTime * 1000);
+              el.textContent = `${ms}ms`;
+              el.className = 'text-[10px] font-mono ' + (ms < 100 ? 'text-green-400' : ms < 300 ? 'text-yellow-400' : 'text-red-400');
+            }
+          }
+          // Auto quality adjustment every 2nd cycle (every 20s)
+          if (this.webrtc && !this._skipAutoQuality) {
             const result = await this.webrtc.autoAdjustQuality();
             if (result?.changed) {
               this.addDebugMessage(`AUTO_QUALITY: ${result.direction} → ${result.quality} (RTT:${result.rtt.toFixed(0)}ms, loss:${result.loss.toFixed(1)}%)`);
-              // Update selector UI
               const sel = document.getElementById('liveQualitySelector');
               if (sel) sel.value = result.quality;
               this.mediaOptions.videoQuality = result.quality;
             }
           }
-        }, 20000);
+          this._skipAutoQuality = !this._skipAutoQuality;
+        }, 10000);
 
         document.getElementById('leaveRoom').addEventListener('click', () => {
           this.leaveRoom();
@@ -2233,12 +2251,12 @@
           this.renderRelayList();
         });
 
-        // Relay list auto-refresh
+        // Relay list auto-refresh (only when visible)
         this._relayRefreshInterval = setInterval(() => {
           if (!document.getElementById('relayPanel').classList.contains('hidden')) {
             this.renderRelayList();
           }
-        }, 5000);
+        }, 8000);
 
         // Add custom relay
         document.getElementById('addRelayBtn').addEventListener('click', async () => {
@@ -2281,11 +2299,8 @@
       },
 
       leaveRoom() {
-        if (this._qualityInterval) {
-          clearInterval(this._qualityInterval);
-        }
-        if (this._autoQualityInterval) {
-          clearInterval(this._autoQualityInterval);
+        if (this._statsInterval) {
+          clearInterval(this._statsInterval);
         }
         if (this._relayRefreshInterval) {
           clearInterval(this._relayRefreshInterval);

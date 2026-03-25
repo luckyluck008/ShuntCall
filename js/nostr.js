@@ -149,7 +149,7 @@ const Nostr = {
             console.warn('Nostr: Connection timeout to', url);
             resolve(false);
           }
-        }, 5000);
+        }, 3000);
         
       } catch (e) {
         console.error('Nostr: Failed to connect to', url, e);
