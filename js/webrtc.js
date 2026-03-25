@@ -821,8 +821,19 @@ const ShuntCallWebRTC = {
   sendData(peerId, data) {
     const channel = this.dataChannels[peerId];
     if (channel && channel.readyState === 'open') {
-      channel.send(JSON.stringify(data));
-      return true;
+      try {
+        const msg = JSON.stringify(data);
+        // Check if message is too large
+        if (channel.maxMessageSize && msg.length > channel.maxMessageSize) {
+          console.warn('DataChannel message too large for peer:', peerId.slice(0, 16), 'size:', msg.length, 'max:', channel.maxMessageSize);
+          return false;
+        }
+        channel.send(msg);
+        return true;
+      } catch (error) {
+        console.error('DataChannel send error to', peerId.slice(0, 16), error);
+        return false;
+      }
     }
     return false;
   },

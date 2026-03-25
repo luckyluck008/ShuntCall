@@ -170,10 +170,9 @@ test.describe('High Severity Code Fixes', () => {
   });
 
   test('Fix 14: maxMessageSize check exists', async ({ page, request }) => {
-    const resp = await request.get('/room.html');
+    const resp = await request.get('/js/webrtc.js');
     const code = await resp.text();
     expect(code).toContain('maxMessageSize');
-    expect(code).toContain('sctp');
   });
 });
 
@@ -530,5 +529,95 @@ test.describe('README Updated', () => {
     expect(text).toContain('Nostr');
     expect(text).not.toContain('Gun.js');
     expect(text).not.toContain('gun');
+  });
+});
+
+test.describe('Screen Sharing — Camera Preserved', () => {
+
+  test('screen share does not stop camera track', async ({ page }) => {
+    const logs = await setupRoom(page, ROOM_ID + '-screen', PASSWORD);
+    // Verify toggleScreen handler doesn't remove/stop camera track
+    const resp = await page.goto('/room.html?room=dummy');
+    const code = await resp.text();
+    // The new code should NOT call oldVideoTrack.stop() when starting screen share
+    // Instead it should add screen track alongside camera
+    const screenShareSection = code.substring(
+      code.indexOf("document.getElementById('toggleScreen')"),
+      code.indexOf("document.getElementById('togglePiP')")
+    );
+    // Should add track, not remove old one
+    expect(screenShareSection).toContain('addTrack(screenTrack');
+    expect(screenShareSection).not.toContain('oldVideoTrack.stop()');
+  });
+
+  test('screen share button is present', async ({ page }) => {
+    const logs = await setupRoom(page, ROOM_ID + '-screen2', PASSWORD);
+    const btn = await page.$('#toggleScreen');
+    expect(btn).not.toBeNull();
+  });
+});
+
+test.describe('Nickname Hot-Reload', () => {
+
+  test('renderChatMessages looks up peerNicknames map', async ({ page }) => {
+    await page.goto('/');
+    const resp = await page.goto('/room.html?room=dummy');
+    const code = await resp.text();
+    // renderChatMessages should use peerNicknames.get()
+    expect(code).toContain("this.peerNicknames.get(msg.peerId)");
+  });
+
+  test('updatePeerNickname stores in peerNicknames and re-renders', async ({ page }) => {
+    await page.goto('/');
+    const resp = await page.goto('/room.html?room=dummy');
+    const code = await resp.text();
+    expect(code).toContain("this.peerNicknames.set(peerId, nickname)");
+    expect(code).toContain("this.renderChatMessages()");
+  });
+
+  test('nickname input triggers re-render of chat', async ({ page, request }) => {
+    const resp = await request.get('/room.html');
+    const code = await resp.text();
+    const nicknameIdx = code.indexOf("nicknameInput.addEventListener('input'");
+    expect(nicknameIdx).toBeGreaterThan(0);
+    const section = code.substring(nicknameIdx, nicknameIdx + 800);
+    expect(section).toContain('renderChatMessages');
+    expect(section).toContain('peerNicknames');
+  });
+});
+
+test.describe('File Sharing Fix', () => {
+
+  test('sendFile uses safe 4KB chunks', async ({ page }) => {
+    await page.goto('/');
+    const resp = await page.goto('/room.html?room=dummy');
+    const code = await resp.text();
+    expect(code).toContain('const CHUNK_SIZE = 4096');
+  });
+
+  test('sendFile has delay between chunks', async ({ page }) => {
+    await page.goto('/');
+    const resp = await page.goto('/room.html?room=dummy');
+    const code = await resp.text();
+    // Should have setTimeout for chunk pacing
+    const sendFileSection = code.substring(
+      code.indexOf('sendFile(file)'),
+      code.indexOf('handleFileOffer(peerId')
+    );
+    expect(sendFileSection).toContain('setTimeout');
+  });
+
+  test('sendData checks message size before sending', async ({ page }) => {
+    await page.goto('/');
+    const resp = await page.goto('/js/webrtc.js');
+    const code = await resp.text();
+    expect(code).toContain('maxMessageSize');
+    expect(code).toContain('msg.length');
+  });
+
+  test('sendFile button exists in room', async ({ page }) => {
+    const logs = await setupRoom(page, ROOM_ID + '-file', PASSWORD);
+    const btn = await page.$('#shareFile');
+    expect(btn).not.toBeNull();
   });
 });

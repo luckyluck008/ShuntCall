@@ -1367,7 +1367,7 @@
             this.addDebugMessage(`MUTE_STATUS: ${peerId.slice(0, 8)} audio=${data.audioMuted ? 'OFF' : 'ON'} video=${data.videoMuted ? 'OFF' : 'ON'}`);
            } else if (data.type === 'chat') {
              const message = await this.decryptMessage(data.message);
-             const expiresAt = data.expiry > 0 ? Date.now() + data.expiry * 1000 : null;
+             const expiresAt = (data.expiry && data.expiry > 0) ? Date.now() + data.expiry * 1000 : null;
              this.addChatMessage(peerId, message, data.timestamp, expiresAt);
           } else if (data.type === 'file-offer') {
             this.handleFileOffer(peerId, data);
@@ -1393,11 +1393,15 @@
           const peer = this.peers.get(peerId);
           if (peer) {
             peer.nickname = nickname;
-            const nameEl = document.getElementById(`nickname-${peerId}`);
-            if (nameEl) {
-              nameEl.textContent = nickname;
-            }
           }
+          // Store in nickname map for chat hot-reload
+          this.peerNicknames.set(peerId, nickname);
+          const nameEl = document.getElementById(`nickname-${peerId}`);
+          if (nameEl) {
+            nameEl.textContent = nickname;
+          }
+          // Re-render chat so existing messages show new name
+          this.renderChatMessages();
           this.addDebugMessage(`NICKNAME: ${peerId.slice(0, 8)} → ${nickname}`);
         },
 
@@ -1451,9 +1455,15 @@
          if (!container) return;
          container.innerHTML = this.chatMessages.map(msg => {
            const isSelf = msg.peerId === 'self';
-           const label = isSelf ? 'You' : msg.peerId.slice(0, 8) + '...';
+           // Look up current nickname dynamically (hot-reloadable)
+           let label;
+           if (isSelf) {
+             label = this.nickname || 'You';
+           } else {
+             label = this.peerNicknames.get(msg.peerId) || msg.peerId.slice(0, 8) + '...';
+           }
            return `<div class="mb-2 ${isSelf ? 'text-right' : ''}">
-             <span class="text-[10px] text-neutral-500 font-mono">${msg.timestamp} ${label}</span>
+             <span class="text-[10px] text-neutral-500 font-mono">${msg.timestamp} ${this.escapeHtml(label)}</span>
              <div class="text-sm ${isSelf ? 'text-white bg-white/10' : 'text-neutral-300 bg-neutral-900'} inline-block px-3 py-1.5 rounded-sm mt-0.5 max-w-[85%] break-words">${this.escapeHtml(msg.message)}</div>
            </div>`;
          }).join('');
@@ -1486,52 +1496,57 @@
        sendFile(file) {
           if (!file || !this.webrtc) return;
           
-          // Determine safe chunk size based on DataChannel maxMessageSize
-          let CHUNK_SIZE = 16384;
-          try {
-            const samplePc = Object.values(this.webrtc.peerConnections)[0];
-            if (samplePc && samplePc.sctp) {
-              const maxMsgSize = samplePc.sctp.maxMessageSize || 65535;
-              // base64 inflates by ~33%, leave margin for JSON overhead
-              CHUNK_SIZE = Math.min(CHUNK_SIZE, Math.floor(maxMsgSize * 0.6));
-            }
-          } catch (e) {
-            // fallback to safe default
-          }
+          // Calculate safe chunk size: DataChannel messages are typically 16KB or 256KB
+          // JSON wrapper + base64 encoding adds ~50% overhead
+          // Use conservative default
+          const CHUNK_SIZE = 4096; // 4KB raw data → ~5.3KB base64 → safe for any DataChannel
           
           const fileId = crypto.getRandomValues(new Uint8Array(8)).reduce((s, b) => s + b.toString(16).padStart(2, '0'), '');
           
+          const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
           const fileData = {
             id: fileId,
             name: file.name,
             size: file.size,
             type: file.type,
-            chunks: Math.ceil(file.size / CHUNK_SIZE)
+            chunks: totalChunks
           };
           
           // Broadcast file offer to all peers
           this.webrtc.broadcastData({ type: 'file-offer', ...fileData });
-          this.addChatMessage('self', `Sharing file: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`, new Date().toISOString().split('T')[1].split('.')[0]);
+          this.addChatMessage('self', `Sharing file: ${file.name} (${(file.size / 1024).toFixed(1)} KB, ${totalChunks} chunks)`, new Date().toISOString().split('T')[1].split('.')[0]);
           
-          // Read and send file in chunks
+          // Read and send file in chunks with delay to avoid overwhelming DataChannel
           const reader = new FileReader();
           let offset = 0;
           let chunkIndex = 0;
           
           reader.onload = (e) => {
             const chunk = btoa(String.fromCharCode(...new Uint8Array(e.target.result)));
+            const isLast = offset + CHUNK_SIZE >= file.size;
+            
             this.webrtc.broadcastData({
               type: 'file-chunk',
               id: fileId,
               index: chunkIndex,
               data: chunk,
-              last: offset + CHUNK_SIZE >= file.size
+              last: isLast
             });
+            
             chunkIndex++;
             offset += CHUNK_SIZE;
+            
             if (offset < file.size) {
-              readSlice(offset);
+              // Small delay between chunks to avoid DataChannel buffer overflow
+              setTimeout(() => readSlice(offset), 50);
+            } else {
+              this.addDebugMessage(`FILE_SENT: ${file.name} (${chunkIndex} chunks)`);
             }
+          };
+          
+          reader.onerror = (err) => {
+            console.error('FileReader error:', err);
+            this.addDebugMessage(`FILE_ERROR: Failed to read ${file.name}`);
           };
           
           const readSlice = (off) => {
@@ -1572,12 +1587,22 @@
             // Show download link in chat
             const time = new Date().toISOString().split('T')[1].split('.')[0];
             const safeName = this.escapeHtml(transfer.meta.name);
-            const downloadLink = `<a href="${url}" download="${safeName}" class="underline text-blue-400 hover:text-blue-300">${safeName}</a>`;
+            const safeUrl = url; // blob: URLs are safe
             const container = document.getElementById('chatMessages');
             if (container) {
               const div = document.createElement('div');
               div.className = 'mb-2';
-              div.innerHTML = `<span class="text-[10px] text-neutral-500 font-mono">${time} ${peerId.slice(0, 8)}...</span><div class="text-sm text-neutral-300 bg-neutral-900 inline-block px-3 py-1.5 rounded-sm mt-0.5">File ready: ${downloadLink}</div>`;
+              const link = document.createElement('a');
+              link.href = safeUrl;
+              link.download = transfer.meta.name;
+              link.className = 'underline text-blue-400 hover:text-blue-300';
+              link.textContent = safeName;
+              const wrapper = document.createElement('div');
+              wrapper.className = 'text-sm text-neutral-300 bg-neutral-900 inline-block px-3 py-1.5 rounded-sm mt-0.5';
+              wrapper.textContent = 'File ready: ';
+              wrapper.appendChild(link);
+              div.innerHTML = `<span class="text-[10px] text-neutral-500 font-mono">${time} ${peerId.slice(0, 8)}...</span>`;
+              div.appendChild(wrapper);
               container.appendChild(div);
               container.scrollTop = container.scrollHeight;
             }
@@ -1652,9 +1677,11 @@
                 const name = e.target.value.trim();
                 if (name && name !== this.nickname) {
                   this.nickname = name;
+                  this.peerNicknames.set('self', name);
                   if (this.signaling) {
                     this.signaling.setNickname(name);
                   }
+                  this.renderChatMessages();
                   this.saveSessionState();
                 }
               }, 500);
@@ -1726,41 +1753,32 @@
         document.getElementById('toggleScreen').addEventListener('click', async () => {
           try {
             if (this.isScreenSharing) {
-              // Stop screen sharing - revert to camera
+              // Stop screen sharing — camera stays alive, just remove screen track
               this.isScreenSharing = false;
               if (this.screenTrack) {
                 this.screenTrack.stop();
+                // Remove screen track from local stream
+                this.localStream.removeTrack(this.screenTrack);
                 this.screenTrack = null;
               }
               
-              // Get new camera stream
-              const cameraStream = await navigator.mediaDevices.getUserMedia({
-                video: {
-                  width: { ideal: 1280 },
-                  height: { ideal: 720 },
-                  frameRate: { ideal: 30 }
-                }
-              });
-              const cameraTrack = cameraStream.getVideoTracks()[0];
-              
-              // Replace in local stream
-              const oldVideoTrack = this.localStream.getVideoTracks()[0];
-              if (oldVideoTrack) {
-                this.localStream.removeTrack(oldVideoTrack);
-                oldVideoTrack.stop();
-              }
-              this.localStream.addTrack(cameraTrack);
-              
-              // Replace in all peer connections via WebRTC module
-              if (this.webrtc && oldVideoTrack) {
-                await this.webrtc.replaceTrackForAllPeers(oldVideoTrack, cameraTrack);
+              // Remove screen track from all peer connections
+              if (this.webrtc) {
+                Object.values(this.webrtc.peerConnections).forEach(pc => {
+                  const screenSender = pc.getSenders().find(s => s.track && s.track.label?.toLowerCase().includes('screen'));
+                  if (screenSender) {
+                    pc.removeTrack(screenSender);
+                  }
+                });
               }
               
+              // Update local preview back to camera only
               document.getElementById('localVideo').srcObject = this.localStream;
               document.getElementById('toggleScreen').classList.remove('bg-white', 'text-black');
               return;
             }
             
+            // Start screen sharing — add as additional track, keep camera alive
             const screenStream = await navigator.mediaDevices.getDisplayMedia({
               video: { cursor: 'always' },
               audio: false
@@ -1769,17 +1787,14 @@
             this.screenTrack = screenTrack;
             this.isScreenSharing = true;
             
-            // Replace video track in local stream
-            const oldVideoTrack = this.localStream.getVideoTracks()[0];
-            if (oldVideoTrack) {
-              this.localStream.removeTrack(oldVideoTrack);
-              oldVideoTrack.stop();
-            }
+            // Add screen track to local stream (camera track stays!)
             this.localStream.addTrack(screenTrack);
             
-            // Replace in all peer connections via WebRTC module
-            if (this.webrtc && oldVideoTrack) {
-              await this.webrtc.replaceTrackForAllPeers(oldVideoTrack, screenTrack);
+            // Add screen track as new track to all peer connections (NOT replacing camera)
+            if (this.webrtc) {
+              Object.values(this.webrtc.peerConnections).forEach(pc => {
+                pc.addTrack(screenTrack, this.localStream);
+              });
             }
             
             document.getElementById('localVideo').srcObject = this.localStream;
@@ -1790,30 +1805,20 @@
               this.isScreenSharing = false;
               this.screenTrack = null;
               
-              try {
-                const cameraStream = await navigator.mediaDevices.getUserMedia({
-                  video: {
-                    width: { ideal: 1280 },
-                    height: { ideal: 720 },
-                    frameRate: { ideal: 30 }
+              // Remove screen track from local stream (camera stays)
+              this.localStream.removeTrack(screenTrack);
+              
+              // Remove screen track from all peer connections
+              if (this.webrtc) {
+                Object.values(this.webrtc.peerConnections).forEach(pc => {
+                  const screenSender = pc.getSenders().find(s => s.track === screenTrack);
+                  if (screenSender) {
+                    pc.removeTrack(screenSender);
                   }
                 });
-                const cameraTrack = cameraStream.getVideoTracks()[0];
-                
-                const oldTrack = this.localStream.getVideoTracks()[0];
-                if (oldTrack) {
-                  this.localStream.removeTrack(oldTrack);
-                }
-                this.localStream.addTrack(cameraTrack);
-                
-                if (this.webrtc && oldTrack) {
-                  await this.webrtc.replaceTrackForAllPeers(oldTrack, cameraTrack);
-                }
-                
-                document.getElementById('localVideo').srcObject = this.localStream;
-              } catch (err) {
-                console.error('Failed to revert to camera:', err);
               }
+              
+              document.getElementById('localVideo').srcObject = this.localStream;
               document.getElementById('toggleScreen').classList.remove('bg-white', 'text-black');
             };
           } catch (error) {
