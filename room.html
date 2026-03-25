@@ -568,6 +568,13 @@
                   audioMuted: !this.isAudioEnabled,
                   videoMuted: !this.isVideoEnabled
                 });
+                // Auto-send pending file if queued
+                if (this._pendingFile) {
+                  const file = this._pendingFile;
+                  this._pendingFile = null;
+                  this.addDebugMessage(`FILE_DEQUEUED: ${file.name}`);
+                  setTimeout(() => this.sendFile(file), 500);
+                }
               });
 
              // Relay Tree event handlers
@@ -1651,12 +1658,27 @@
        },
 
        sendFile(file) {
-          if (!file || !this.webrtc) return;
+          if (!file) return;
+          if (!this.webrtc) {
+            this.addChatMessage('self', '[File send failed: WebRTC not initialized]', new Date().toISOString().split('T')[1].split('.')[0]);
+            return;
+          }
           
-          // Calculate safe chunk size: DataChannel messages are typically 16KB or 256KB
-          // JSON wrapper + base64 encoding adds ~50% overhead
-          // Use conservative default
-          const CHUNK_SIZE = 4096; // 4KB raw data → ~5.3KB base64 → safe for any DataChannel
+          // Check if any data channels are open
+          const openChannels = Object.entries(this.webrtc.dataChannels || {})
+            .filter(([, dc]) => dc.readyState === 'open');
+          
+          if (openChannels.length === 0) {
+            this.addChatMessage('self', `[File "${file.name}" queued — waiting for peers to connect]`, new Date().toISOString().split('T')[1].split('.')[0]);
+            this.addDebugMessage(`FILE_QUEUED: ${file.name} (no peers connected)`);
+            
+            // Queue file to send when a peer connects
+            this._pendingFile = file;
+            return;
+          }
+          
+          // Calculate safe chunk size
+          const CHUNK_SIZE = 4096;
           
           const fileId = crypto.getRandomValues(new Uint8Array(8)).reduce((s, b) => s + b.toString(16).padStart(2, '0'), '');
           
@@ -1670,8 +1692,14 @@
           };
           
           // Broadcast file offer to all peers
-          this.webrtc.broadcastData({ type: 'file-offer', ...fileData });
-          this.addChatMessage('self', `Sharing file: ${file.name} (${(file.size / 1024).toFixed(1)} KB, ${totalChunks} chunks)`, new Date().toISOString().split('T')[1].split('.')[0]);
+          const offerSent = this.webrtc.broadcastData({ type: 'file-offer', ...fileData });
+          this.addDebugMessage(`FILE_OFFER: ${file.name} → ${offerSent} peer(s)`);
+          this.addChatMessage('self', `Sharing file: ${file.name} (${(file.size / 1024).toFixed(1)} KB, ${totalChunks} chunks) to ${offerSent} peer(s)`, new Date().toISOString().split('T')[1].split('.')[0]);
+          
+          if (offerSent === 0) {
+            this.addChatMessage('self', `[No peers received the file offer]`, new Date().toISOString().split('T')[1].split('.')[0]);
+            return;
+          }
           
           // Read and send file in chunks with delay to avoid overwhelming DataChannel
           const reader = new FileReader();
@@ -1694,7 +1722,6 @@
             offset += CHUNK_SIZE;
             
             if (offset < file.size) {
-              // Small delay between chunks to avoid DataChannel buffer overflow
               setTimeout(() => readSlice(offset), 50);
             } else {
               this.addDebugMessage(`FILE_SENT: ${file.name} (${chunkIndex} chunks)`);
