@@ -5,10 +5,12 @@
 
 const NostrRelays = [
   'wss://nos.lol',
-  'wss://njump.me',
+  'wss://relay.damus.io',
   'wss://relay.primal.net',
   'wss://relay.snort.social',
-  'wss://nostr.wine'
+  'wss://relay.nostr.band',
+  'wss://purplepag.es',
+  'wss://nostr.wellorder.net'
 ];
 
 const Nostr = {
@@ -18,6 +20,7 @@ const Nostr = {
   connectionStatus: 'disconnected',
   listeners: {},
   relayHealth: {},
+  writableRelays: new Set(),
 
   async init() {
     console.log('Nostr: Initializing');
@@ -100,6 +103,8 @@ const Nostr = {
             messagesReceived: 0,
             messagesSent: 0,
             errors: 0,
+            okReceived: 0,
+            okRejected: 0,
             reconnects: (this.relayHealth[url]?.reconnects || 0)
           };
           this.emit('relay:connected', url);
@@ -113,7 +118,7 @@ const Nostr = {
               this.relayHealth[url].lastMessage = Date.now();
               this.relayHealth[url].messagesReceived++;
             }
-            this.handleMessage(msg);
+            this.handleMessage(msg, url);
           } catch (e) {
             console.warn('Nostr: Failed to parse message from', url, e);
           }
@@ -130,6 +135,7 @@ const Nostr = {
         ws.onclose = () => {
           console.log('Nostr: Disconnected from', url);
           this.relays[url] = null;
+          this.writableRelays.delete(url);
           if (this.relayHealth[url]) {
             this.relayHealth[url].connected = false;
             this.relayHealth[url].reconnects++;
@@ -152,7 +158,7 @@ const Nostr = {
     });
   },
 
-  handleMessage(msg) {
+  handleMessage(msg, relayUrl) {
     try {
       if (!msg || !Array.isArray(msg)) {
         return;
@@ -183,11 +189,46 @@ const Nostr = {
       } else if (type === 'OK') {
         const eventId = rest[0];
         const success = rest[1];
-        if (!success) {
-          console.warn('Nostr: Event rejected:', eventId?.slice(0, 16), rest[2]);
+        const reason = rest[2] || '';
+        
+        if (success) {
+          // Mark relay as writable
+          if (relayUrl) {
+            this.writableRelays.add(relayUrl);
+          }
+          if (this.relayHealth[relayUrl]) {
+            this.relayHealth[relayUrl].okReceived++;
+          }
+        } else {
+          console.warn('Nostr: Event rejected by', relayUrl, ':', eventId?.slice(0, 16), reason);
+          if (this.relayHealth[relayUrl]) {
+            this.relayHealth[relayUrl].okRejected++;
+          }
+        }
+        
+        // Resolve publish promise if tracked
+        if (this._publishResolves && this._publishResolves[eventId]) {
+          const resolvers = this._publishResolves[eventId];
+          if (success) {
+            resolvers.accepted.push(relayUrl);
+            if (resolvers.resolve) {
+              resolvers.resolve(resolvers.accepted);
+              resolvers.resolve = null;
+            }
+          } else {
+            resolvers.rejected.push({ relay: relayUrl, reason });
+            // If all relays responded and none accepted, reject
+            const totalResponded = resolvers.accepted.length + resolvers.rejected.length;
+            if (totalResponded >= resolvers.totalRelays && resolvers.accepted.length === 0) {
+              if (resolvers.resolve) {
+                resolvers.resolve([]); // return empty array = no relay accepted
+                resolvers.resolve = null;
+              }
+            }
+          }
         }
       } else if (type === 'NOTICE') {
-        console.log('Nostr: NOTICE:', rest);
+        console.log('Nostr: NOTICE from', relayUrl, ':', rest);
       }
     } catch (error) {
       console.error('Nostr: Message handling error', error);
@@ -199,12 +240,9 @@ const Nostr = {
       console.log('Nostr: Creating subscription', subId, 'with filters', JSON.stringify(filters));
       this.subscriptions[subId] = { filters, callback, onEose, eose: false };
       
-      // Ensure filters is an array for valid Nostr protocol
       const filtersArray = Array.isArray(filters) ? filters : [filters];
       const msg = ['REQ', subId, ...filtersArray];
-      console.log('Nostr: Sending subscription request:', msg);
       
-      // Add a timer to check if we received EOSE
       const eoseTimer = setTimeout(() => {
         if (!this.subscriptions[subId]?.eose) {
           console.warn('Nostr: No EOSE received for sub', subId, 'within 10 seconds');
@@ -251,19 +289,46 @@ const Nostr = {
       const signedEvent = window.NostrTools.finalizeEvent(event, this.keys.privateKey);
       event.sig = signedEvent.sig;
       
-      const msg = ['EVENT', event];
-      this.send(msg);
+      // Track OK responses
+      if (!this._publishResolves) this._publishResolves = {};
+      const connectedRelays = Object.keys(this.relays).filter(url => this.relays[url]?.readyState === 1);
       
-      console.log('Nostr: Published event', event.id.slice(0, 16) + '...');
+      const accepted = await new Promise((resolve) => {
+        this._publishResolves[event.id] = {
+          resolve,
+          accepted: [],
+          rejected: [],
+          totalRelays: connectedRelays.length
+        };
+        
+        const msg = ['EVENT', event];
+        this.send(msg);
+        
+        // Timeout: resolve after 5s if at least one relay accepted, or all rejected
+        setTimeout(() => {
+          const resolvers = this._publishResolves[event.id];
+          if (resolvers && resolvers.resolve) {
+            resolve(resolvers.accepted);
+            resolvers.resolve = null;
+          }
+        }, 5000);
+      });
       
-      return event;
+      if (accepted.length === 0) {
+        console.warn('Nostr: Event', event.id.slice(0, 16), 'NOT accepted by any relay');
+      } else {
+        console.log('Nostr: Published event', event.id.slice(0, 16), 'accepted by', accepted.length, 'relay(s):', accepted.map(r => r.replace('wss://', '')).join(', '));
+      }
+      
+      // Cleanup tracking
+      delete this._publishResolves[event.id];
+      
+      return { event, accepted };
     } catch (error) {
       console.error('Nostr: Publish error', error);
       throw error;
     }
   },
-
-
 
   send(msg) {
     try {
@@ -318,6 +383,7 @@ const Nostr = {
     const subscriptions = Object.keys(this.subscriptions).length;
     return {
       connected,
+      writable: this.writableRelays.size,
       total: NostrRelays.length,
       pubkey: this.keys?.publicKey,
       subscriptions,
@@ -327,6 +393,10 @@ const Nostr = {
 
   getHealthyRelays() {
     return Object.keys(this.relays).filter(url => this.relays[url]?.readyState === 1);
+  },
+
+  getWritableRelays() {
+    return [...this.writableRelays];
   },
 
   async addCustomRelay(url) {
@@ -346,6 +416,7 @@ const Nostr = {
       ws.close();
       delete this.relays[url];
       delete this.relayHealth[url];
+      this.writableRelays.delete(url);
     }
   },
 
@@ -353,6 +424,7 @@ const Nostr = {
     return Object.keys(this.relays).map(url => ({
       url,
       connected: this.relays[url]?.readyState === 1,
+      writable: this.writableRelays.has(url),
       health: this.relayHealth[url] || null
     }));
   }

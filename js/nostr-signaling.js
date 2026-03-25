@@ -309,8 +309,8 @@ const NostrSignaling = {
         ['p', targetPubkey]
       ];
 
-      const event = await this.nostr.publish(EVENT_KIND, tags, JSON.stringify(payload));
-      console.log('NostrSignaling: Sent offer - event:', event.id.slice(0, 16));
+      const result = await this.nostr.publish(EVENT_KIND, tags, JSON.stringify(payload));
+      console.log('NostrSignaling: Sent offer - event:', result.event.id.slice(0, 16), 'accepted by', result.accepted.length, 'relays');
     } catch (error) {
       console.error('NostrSignaling: Send offer error', error);
       throw error;
@@ -333,8 +333,8 @@ const NostrSignaling = {
         ['e', offerEventId]
       ];
 
-      const event = await this.nostr.publish(EVENT_KIND, tags, JSON.stringify(payload));
-      console.log('NostrSignaling: Sent answer - event:', event.id.slice(0, 16));
+      const result = await this.nostr.publish(EVENT_KIND, tags, JSON.stringify(payload));
+      console.log('NostrSignaling: Sent answer - event:', result.event.id.slice(0, 16), 'accepted by', result.accepted.length, 'relays');
     } catch (error) {
       console.error('NostrSignaling: Send answer error', error);
       throw error;
@@ -353,8 +353,11 @@ const NostrSignaling = {
         ['t', this.roomTag]
       ];
 
-      const event = await this.nostr.publish(EVENT_KIND, tags, JSON.stringify(payload));
-      console.log('NostrSignaling: Presence broadcast sent - event:', event.id.slice(0, 16));
+      const result = await this.nostr.publish(EVENT_KIND, tags, JSON.stringify(payload));
+      console.log('NostrSignaling: Presence broadcast sent - event:', result.event.id.slice(0, 16), 'accepted by', result.accepted.length, 'relays');
+      if (result.accepted.length === 0) {
+        console.warn('NostrSignaling: WARNING - No relay accepted presence event! Peers may not see us.');
+      }
     } catch (error) {
       console.error('NostrSignaling: Broadcast presence error', error);
       throw error;
@@ -375,8 +378,8 @@ const NostrSignaling = {
         ['p', targetPubkey]
       ];
 
-      const event = await this.nostr.publish(EVENT_KIND, tags, JSON.stringify(payload));
-      console.log('NostrSignaling: Sent ICE candidate - event:', event.id.slice(0, 16));
+      const result = await this.nostr.publish(EVENT_KIND, tags, JSON.stringify(payload));
+      console.log('NostrSignaling: Sent ICE candidate - event:', result.event.id.slice(0, 16), 'accepted by', result.accepted.length, 'relays');
     } catch (error) {
       console.error('NostrSignaling: Send ICE candidate error', error);
       throw error;

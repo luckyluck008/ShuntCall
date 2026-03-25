@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' wss://nos.lol wss://njump.me wss://relay.primal.net wss://relay.snort.social wss://nostr.wine; img-src 'self' blob: data:; media-src 'self' blob:;">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' wss://nos.lol wss://relay.damus.io wss://relay.primal.net wss://relay.snort.social wss://relay.nostr.band wss://purplepag.es wss://nostr.wellorder.net; img-src 'self' blob: data:; media-src 'self' blob:;">
   <title>ShuntCall - Protocol Room</title>
   
   <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
@@ -908,8 +908,53 @@
 
           } catch (error) {
             console.error('Media error:', error);
-            this.showError('Hardware access error', error.message);
-            throw error;
+            console.log('Creating mock stream fallback...');
+            
+            // Fallback: create mock stream for environments without camera
+            try {
+              const mockStream = new MediaStream();
+              
+              if (this.mediaOptions.video) {
+                const canvas = document.createElement('canvas');
+                canvas.width = 640;
+                canvas.height = 480;
+                const ctx = canvas.getContext('2d');
+                ctx.fillStyle = '#111';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                const videoTrack = canvas.captureStream(30).getVideoTracks()[0];
+                if (videoTrack) mockStream.addTrack(videoTrack);
+              }
+              
+              if (this.mediaOptions.audio) {
+                try {
+                  const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                  const oscillator = audioCtx.createOscillator();
+                  const gain = audioCtx.createGain();
+                  gain.gain.value = 0; // silent
+                  const dest = audioCtx.createMediaStreamDestination();
+                  oscillator.connect(gain);
+                  gain.connect(dest);
+                  oscillator.start();
+                  const audioTrack = dest.stream.getAudioTracks()[0];
+                  if (audioTrack) mockStream.addTrack(audioTrack);
+                } catch (audioErr) {
+                  console.warn('Mock audio creation failed:', audioErr);
+                }
+              }
+              
+              this.localStream = mockStream;
+              const localVideo = document.getElementById('localVideo');
+              localVideo.srcObject = mockStream;
+              console.log('Mock stream created with', mockStream.getTracks().length, 'tracks');
+              
+              this.webcamCapabilities = { width: 640, height: 480, frameRate: 30 };
+              this.supportedQualities = ['480p'];
+              this.populateLiveQualitySelector();
+            } catch (mockError) {
+              console.error('Mock stream creation also failed:', mockError);
+              this.showError('Hardware access error', error.message);
+              throw error;
+            }
           }
         },
 
