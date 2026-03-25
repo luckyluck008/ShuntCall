@@ -540,6 +540,8 @@
               // Setup WebRTC event handlers
               this.webrtc.on('remoteStream', (data) => {
                 console.log('Remote stream from:', data.peerId.slice(0, 16) + '...');
+                // Clear wrong password warning timer
+                if (this._wrongPwTimeout) { clearTimeout(this._wrongPwTimeout); this._wrongPwTimeout = null; }
                 this.addRemoteStream(data.peerId, data.stream, data.isFirstTrack);
                 
                 // Relay forwarding: if we have children in the tree, forward this stream
@@ -561,6 +563,8 @@
 
               this.webrtc.on('dataChannelOpen', (data) => {
                 console.log('DataChannel open with:', data.peerId.slice(0, 8));
+                // Clear wrong password warning timer
+                if (this._wrongPwTimeout) { clearTimeout(this._wrongPwTimeout); this._wrongPwTimeout = null; }
                 this.addDebugMessage(`DATACHANNEL_OPEN: ${data.peerId.slice(0, 8)}`);
                 // Send current mute state to newly connected peer
                 this.webrtc.sendData(data.peerId, {
@@ -700,6 +704,14 @@
            document.getElementById('loadingScreen').classList.add('hidden');
            document.getElementById('room').classList.remove('hidden');
 
+           // Warn if no peers connect within 20 seconds (wrong password?)
+           this._wrongPwTimeout = setTimeout(() => {
+             if (this.peers.size === 0 && !this._wrongPwShown) {
+               this._wrongPwShown = true;
+               this.showWrongPasswordHint();
+             }
+           }, 20000);
+
          } catch (error) {
            console.error('Init error:', error);
            this.showError('Connection failed', error.message);
@@ -819,11 +831,30 @@
         }
       },
 
-      showLoading(text) {
-        document.getElementById('loadingText').textContent = text;
-        document.getElementById('loadingScreen').classList.remove('hidden');
-        document.getElementById('room').classList.add('hidden');
-      },
+       showLoading(text) {
+         document.getElementById('loadingText').textContent = text;
+         document.getElementById('loadingScreen').classList.remove('hidden');
+         document.getElementById('room').classList.add('hidden');
+       },
+
+       showWrongPasswordHint() {
+         const modal = document.createElement('div');
+         modal.className = 'fixed top-6 left-1/2 -translate-x-1/2 bg-black/95 backdrop-blur-md border border-amber-900/50 p-5 z-[110] max-w-md';
+         modal.innerHTML = `
+           <div class="flex items-start gap-3">
+             <span class="font-mono text-xs text-amber-500 border border-amber-900 px-2 py-1 flex-shrink-0">HINT</span>
+             <div>
+               <p class="text-amber-300 text-sm mb-1">No peers found after 20 seconds.</p>
+               <p class="text-neutral-400 text-xs font-mono">If you created this room, check if the password matches. Wrong password = different namespace.</p>
+             </div>
+             <button class="text-neutral-500 hover:text-white ml-2 flex-shrink-0" onclick="this.closest('.fixed').remove()">
+               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M6 18L18 6M6 6l12 12"></path></svg>
+             </button>
+           </div>
+         `;
+         document.body.appendChild(modal);
+         setTimeout(() => { if (modal.parentNode) modal.remove(); }, 15000);
+       },
 
         async initMedia() {
           const isSecure = window.location.protocol === 'https:' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';

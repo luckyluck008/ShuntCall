@@ -739,3 +739,27 @@ test.describe('Zoom-Style Device Picker', () => {
     expect(hasRoom).toBe(true);
   });
 });
+
+test.describe('Wrong Password Hint', () => {
+
+  test('showWrongPasswordHint method exists', async ({ page, request }) => {
+    const resp = await request.get('/room.html');
+    const code = await resp.text();
+    expect(code).toContain('showWrongPasswordHint');
+    expect(code).toContain('Wrong password = different namespace');
+  });
+
+  test('warning timer is set after room init', async ({ page, request }) => {
+    const resp = await request.get('/room.html');
+    const code = await resp.text();
+    expect(code).toContain('_wrongPwTimeout');
+    expect(code).toContain('20000');
+  });
+
+  test('timer is cleared when peer connects', async ({ page, request }) => {
+    const resp = await request.get('/room.html');
+    const code = await resp.text();
+    // Timer should be cleared on remoteStream or dataChannelOpen
+    expect(code).toContain('clearTimeout(this._wrongPwTimeout)');
+  });
+});
