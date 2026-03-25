@@ -1,13 +1,16 @@
 /**
  * Relay Tree Module
- * Bandwidth measurement and tree-based forwarding
+ * Bandwidth measurement, tree-based topology, and video stream forwarding
  */
 
 const RELAY_CONFIG = {
   maxChildren: 3,
   bandwidthCheckInterval: 5000,
   treeReorgInterval: 30000,
-  relayThreshold: 2 * 1024 * 1024
+  relayThreshold: 2 * 1024 * 1024,
+  forwardCanvasWidth: 640,
+  forwardCanvasHeight: 480,
+  forwardFrameRate: 24
 };
 
 const ShuntCallRelayTree = {
@@ -18,6 +21,8 @@ const ShuntCallRelayTree = {
   statsInterval: null,
   reorgInterval: null,
   listeners: {},
+  forwardedStreams: {},
+  forwardElements: {},
 
   /**
    * Initialize relay tree
@@ -27,6 +32,8 @@ const ShuntCallRelayTree = {
   init(peerId, webrtc) {
     this.peerId = peerId;
     this.webrtc = webrtc;
+    this.forwardedStreams = {};
+    this.forwardElements = {};
     
     this.tree[peerId] = {
       id: peerId,
@@ -68,6 +75,7 @@ const ShuntCallRelayTree = {
       parent.children.push(peerId);
       if (parent.children.length >= RELAY_CONFIG.maxChildren) {
         parent.isRelay = true;
+        this.emit('relayActivated', { peerId: parent.id });
       }
     }
     
@@ -81,6 +89,9 @@ const ShuntCallRelayTree = {
   removePeer(peerId) {
     const node = this.tree[peerId];
     if (!node) return;
+    
+    // Stop any forwarding for this peer
+    this.stopForwarding(peerId);
     
     if (node.parent) {
       const parent = this.tree[node.parent];
@@ -124,11 +135,182 @@ const ShuntCallRelayTree = {
     if (newParentId) {
       const newParent = this.tree[newParentId];
       if (newParent) {
+        if (newParent.children.length >= RELAY_CONFIG.maxChildren) {
+          // Find alternative parent with capacity
+          const altParent = this.findBestParent(childId);
+          if (altParent && altParent !== newParentId) {
+            this.reconnectChild(childId, altParent);
+            return;
+          }
+        }
         newParent.children.push(childId);
       }
     }
     
     this.emit('peerReconnected', { peerId: childId, newParentId });
+  },
+
+  /**
+   * Start forwarding a remote video stream to children via canvas capture
+   * @param {string} sourcePeerId - Peer whose stream to forward
+   * @param {MediaStream} stream - The stream to forward
+   */
+  startForwarding(sourcePeerId, stream) {
+    if (!this.webrtc) return;
+    
+    const node = this.tree[this.peerId];
+    if (!node || node.children.length === 0) return;
+    
+    // Don't forward if already forwarding this source
+    if (this.forwardedStreams[sourcePeerId]) {
+      this.updateForwardStream(sourcePeerId, stream);
+      return;
+    }
+    
+    console.log('Starting video forwarding from:', sourcePeerId.slice(0, 8), 'to', node.children.length, 'children');
+    
+    // Create hidden video element to receive the source stream
+    const video = document.createElement('video');
+    video.autoplay = true;
+    video.playsInline = true;
+    video.muted = true;
+    video.srcObject = stream;
+    video.style.display = 'none';
+    document.body.appendChild(video);
+    
+    // Create canvas to capture and re-render video
+    const canvas = document.createElement('canvas');
+    canvas.width = RELAY_CONFIG.forwardCanvasWidth;
+    canvas.height = RELAY_CONFIG.forwardCanvasHeight;
+    canvas.style.display = 'none';
+    document.body.appendChild(canvas);
+    const ctx = canvas.getContext('2d');
+    
+    // Create forwarded stream from canvas
+    const forwardStream = canvas.captureStream(RELAY_CONFIG.forwardFrameRate);
+    
+    // Add audio track from original stream if available
+    const audioTracks = stream.getAudioTracks();
+    if (audioTracks.length > 0) {
+      forwardStream.addTrack(audioTracks[0]);
+    }
+    
+    // Animation loop to draw video frames to canvas
+    let animId = null;
+    const drawFrame = () => {
+      if (video.readyState >= video.HAVE_CURRENT_DATA) {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      }
+      animId = requestAnimationFrame(drawFrame);
+    };
+    video.onloadeddata = () => drawFrame();
+    
+    this.forwardedStreams[sourcePeerId] = {
+      stream: forwardStream,
+      sourceStream: stream,
+      video,
+      canvas,
+      animId,
+      children: [...node.children]
+    };
+    this.forwardElements[sourcePeerId] = { video, canvas };
+    
+    // Send forwarded stream to all children
+    node.children.forEach(childId => {
+      this.sendForwardToPeer(childId, forwardStream);
+    });
+    
+    this.emit('forwardingStarted', { sourcePeerId, childrenCount: node.children.length });
+  },
+
+  /**
+   * Update the source stream for an existing forward
+   */
+  updateForwardStream(sourcePeerId, newStream) {
+    const fwd = this.forwardedStreams[sourcePeerId];
+    if (!fwd) return;
+    
+    fwd.sourceStream = newStream;
+    fwd.video.srcObject = newStream;
+    
+    // Update audio track
+    const audioTracks = newStream.getAudioTracks();
+    if (audioTracks.length > 0) {
+      const existingAudio = fwd.stream.getAudioTracks();
+      existingAudio.forEach(t => fwd.stream.removeTrack(t));
+      fwd.stream.addTrack(audioTracks[0]);
+    }
+  },
+
+  /**
+   * Send a forwarded stream to a specific peer
+   */
+  sendForwardToPeer(peerId, stream) {
+    if (!this.webrtc) return;
+    
+    const pc = this.webrtc.peerConnections[peerId];
+    if (!pc) {
+      console.warn('No peer connection for forwarding to:', peerId.slice(0, 8));
+      return;
+    }
+    
+    // Add tracks from forwarded stream
+    stream.getTracks().forEach(track => {
+      const existingSender = pc.getSenders().find(s => s.track?.kind === track.kind && s.track?.label === 'relay');
+      if (!existingSender) {
+        const sender = pc.addTrack(track, stream);
+        console.log('Forwarded track added to peer:', peerId.slice(0, 8), track.kind);
+      }
+    });
+  },
+
+  /**
+   * Forward a stream to newly joined children
+   */
+  forwardToNewChild(childId) {
+    Object.entries(this.forwardedStreams).forEach(([sourcePeerId, fwd]) => {
+      if (!fwd.children.includes(childId)) {
+        fwd.children.push(childId);
+        this.sendForwardToPeer(childId, fwd.stream);
+      }
+    });
+  },
+
+  /**
+   * Stop forwarding for a specific source peer
+   */
+  stopForwarding(sourcePeerId) {
+    const fwd = this.forwardedStreams[sourcePeerId];
+    if (!fwd) return;
+    
+    if (fwd.animId) cancelAnimationFrame(fwd.animId);
+    if (fwd.video) {
+      fwd.video.srcObject = null;
+      fwd.video.remove();
+    }
+    if (fwd.canvas) fwd.canvas.remove();
+    if (fwd.stream) fwd.stream.getTracks().forEach(t => t.stop());
+    
+    delete this.forwardedStreams[sourcePeerId];
+    delete this.forwardElements[sourcePeerId];
+    
+    this.emit('forwardingStopped', { sourcePeerId });
+  },
+
+  /**
+   * Stop all forwarding
+   */
+  stopAllForwarding() {
+    Object.keys(this.forwardedStreams).forEach(sourcePeerId => {
+      this.stopForwarding(sourcePeerId);
+    });
+  },
+
+  /**
+   * Get list of peers we are forwarding for
+   */
+  getForwardingSources() {
+    return Object.keys(this.forwardedStreams);
   },
 
   /**
@@ -172,7 +354,11 @@ const ShuntCallRelayTree = {
         
         if (this.tree[peerId]) {
           this.tree[peerId].bandwidth = downloadMbps;
-          this.tree[peerId].isRelay = downloadMbps > (RELAY_CONFIG.relayThreshold / 1000000);
+          // Only mark as relay by bandwidth if not already a tree-based relay
+          if (!this.tree[peerId].isRelay) {
+            const thresholdMbps = RELAY_CONFIG.relayThreshold * 8 / 1000000;
+            this.tree[peerId].isRelay = downloadMbps > thresholdMbps;
+          }
         }
         
         this.emit('bandwidthUpdate', {
@@ -201,11 +387,22 @@ const ShuntCallRelayTree = {
   reorganizeTree() {
     const nodes = Object.values(this.tree).filter(n => n.id !== this.peerId);
     
+    // Orphaned nodes (no parent) get assigned to best parent
     nodes.forEach(node => {
       if (!node.parent) {
         const bestParent = this.findBestParent(node.id);
         if (bestParent && bestParent !== node.parent) {
           this.reconnectChild(node.id, bestParent);
+        }
+      }
+    });
+    
+    // Check if any node with too many hops should be reorganized
+    nodes.forEach(node => {
+      if (node.hops > 3 && node.parent) {
+        const betterParent = this.findBestParent(node.id);
+        if (betterParent && betterParent !== node.parent) {
+          this.reconnectChild(node.id, betterParent);
         }
       }
     });
@@ -228,7 +425,11 @@ const ShuntCallRelayTree = {
     
     if (candidates.length === 0) return this.peerId;
     
-    candidates.sort((a, b) => a.hops - b.hops);
+    // Prefer nodes with fewer hops and higher bandwidth
+    candidates.sort((a, b) => {
+      if (a.hops !== b.hops) return a.hops - b.hops;
+      return (b.bandwidth || 0) - (a.bandwidth || 0);
+    });
     return candidates[0].id;
   },
 
@@ -331,11 +532,14 @@ const ShuntCallRelayTree = {
    * Destroy relay tree
    */
   destroy() {
+    this.stopAllForwarding();
     if (this.statsInterval) clearInterval(this.statsInterval);
     if (this.reorgInterval) clearInterval(this.reorgInterval);
     this.tree = {};
     this.bandwidthData = {};
     this.listeners = {};
+    this.forwardedStreams = {};
+    this.forwardElements = {};
   }
 };
 
@@ -344,4 +548,3 @@ if (typeof window !== 'undefined') {
 }
 
 export { ShuntCallRelayTree };
-console.log('ShuntCallRelayTree module loaded');

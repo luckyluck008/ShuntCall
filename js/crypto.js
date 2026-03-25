@@ -59,4 +59,3 @@ if (typeof window !== 'undefined') {
 }
 
 export { ShuntCallCrypto };
-console.log('ShuntCallCrypto module loaded');

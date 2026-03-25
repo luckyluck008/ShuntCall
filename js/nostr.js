@@ -17,6 +17,7 @@ const Nostr = {
   subscriptions: {},
   connectionStatus: 'disconnected',
   listeners: {},
+  relayHealth: {},
 
   async init() {
     console.log('Nostr: Initializing');
@@ -93,6 +94,14 @@ const Nostr = {
         ws.onopen = () => {
           console.log('Nostr: Connected to', url);
           this.relays[url] = ws;
+          this.relayHealth[url] = {
+            connected: true,
+            lastMessage: Date.now(),
+            messagesReceived: 0,
+            messagesSent: 0,
+            errors: 0,
+            reconnects: (this.relayHealth[url]?.reconnects || 0)
+          };
           this.emit('relay:connected', url);
           resolve(true);
         };
@@ -100,7 +109,10 @@ const Nostr = {
         ws.onmessage = (event) => {
           try {
             const msg = JSON.parse(event.data);
-            console.log('Nostr: Received from', url, msg);
+            if (this.relayHealth[url]) {
+              this.relayHealth[url].lastMessage = Date.now();
+              this.relayHealth[url].messagesReceived++;
+            }
             this.handleMessage(msg);
           } catch (e) {
             console.warn('Nostr: Failed to parse message from', url, e);
@@ -109,12 +121,19 @@ const Nostr = {
         
         ws.onerror = (error) => {
           console.warn('Nostr: Relay error', url, error);
+          if (this.relayHealth[url]) {
+            this.relayHealth[url].errors++;
+          }
           this.emit('relay:error', { url, error });
         };
         
         ws.onclose = () => {
           console.log('Nostr: Disconnected from', url);
           this.relays[url] = null;
+          if (this.relayHealth[url]) {
+            this.relayHealth[url].connected = false;
+            this.relayHealth[url].reconnects++;
+          }
           this.emit('relay:disconnected', url);
           setTimeout(() => this.connectToRelay(url), 5000);
         };
@@ -136,7 +155,6 @@ const Nostr = {
   handleMessage(msg) {
     try {
       if (!msg || !Array.isArray(msg)) {
-        console.warn('Nostr: Invalid message format', msg);
         return;
       }
       
@@ -145,39 +163,31 @@ const Nostr = {
       if (type === 'EVENT') {
         const subId = rest[0];
         const data = rest[1];
-        console.log('Nostr: Got EVENT for sub', subId, 'kind:', data?.kind);
         const subscription = this.subscriptions[subId];
         if (subscription) {
           subscription.callback(data);
-        } else {
-          console.warn('Nostr: No subscription for subId', subId);
         }
       } else if (type === 'EOSE') {
         const subId = rest[0];
-        console.log('Nostr: Got EOSE for sub', subId);
         const subscription = this.subscriptions[subId];
         if (subscription) {
           subscription.eose = true;
           if (subscription.onEose) {
             subscription.onEose();
           }
-          // Clear timer
           if (subscription.eoseTimer) {
             clearTimeout(subscription.eoseTimer);
             subscription.eoseTimer = null;
           }
-        } else {
-          console.warn('Nostr: No subscription for EOSE subId', subId);
         }
       } else if (type === 'OK') {
         const eventId = rest[0];
         const success = rest[1];
-        const message = rest[2];
-        console.log('Nostr: OK message - event:', eventId?.slice(0, 16), 'success:', success, 'message:', message);
+        if (!success) {
+          console.warn('Nostr: Event rejected:', eventId?.slice(0, 16), rest[2]);
+        }
       } else if (type === 'NOTICE') {
         console.log('Nostr: NOTICE:', rest);
-      } else {
-        console.log('Nostr: Unknown message type:', type, rest);
       }
     } catch (error) {
       console.error('Nostr: Message handling error', error);
@@ -257,7 +267,6 @@ const Nostr = {
 
   send(msg) {
     try {
-      // Handle cyclic references
       const seen = new WeakSet();
       const data = JSON.stringify(msg, (key, value) => {
         if (typeof value === 'object' && value !== null) {
@@ -272,14 +281,14 @@ const Nostr = {
       Object.keys(this.relays).forEach(url => {
         const ws = this.relays[url];
         if (ws && ws.readyState === 1) {
-          console.log('Nostr: Sending to relay', url, msg[0]);
           try {
             ws.send(data);
+            if (this.relayHealth[url]) {
+              this.relayHealth[url].messagesSent++;
+            }
           } catch (error) {
             console.error('Nostr: Error sending to relay', url, error);
           }
-        } else {
-          console.warn('Nostr: Relay not connected or ready', url, ws?.readyState);
         }
       });
     } catch (error) {
@@ -311,12 +320,44 @@ const Nostr = {
       connected,
       total: NostrRelays.length,
       pubkey: this.keys?.publicKey,
-      subscriptions
+      subscriptions,
+      relayHealth: { ...this.relayHealth }
     };
+  },
+
+  getHealthyRelays() {
+    return Object.keys(this.relays).filter(url => this.relays[url]?.readyState === 1);
+  },
+
+  async addCustomRelay(url) {
+    if (!url || !url.startsWith('wss://')) {
+      throw new Error('Invalid relay URL. Must start with wss://');
+    }
+    if (this.relays[url]) {
+      throw new Error('Relay already connected');
+    }
+    await this.connectToRelay(url);
+    return this.relays[url]?.readyState === 1;
+  },
+
+  removeRelay(url) {
+    const ws = this.relays[url];
+    if (ws) {
+      ws.close();
+      delete this.relays[url];
+      delete this.relayHealth[url];
+    }
+  },
+
+  getAllRelays() {
+    return Object.keys(this.relays).map(url => ({
+      url,
+      connected: this.relays[url]?.readyState === 1,
+      health: this.relayHealth[url] || null
+    }));
   }
 };
 
 if (typeof window !== 'undefined') window.Nostr = Nostr;
 
 export { Nostr };
-console.log('Nostr module loaded');

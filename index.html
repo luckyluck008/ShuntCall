@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' wss://nos.lol wss://njump.me wss://relay.primal.net wss://relay.snort.social wss://nostr.wine; img-src 'self' blob: data:; media-src 'self' blob:;">
   <title>ShuntCall - Secure P2P Video</title>
   
   <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
@@ -80,6 +81,11 @@
       border-color: #ffffff;
       background: rgba(255, 255, 255, 0.05);
     }
+    /* Copy protection */
+    .no-select {
+      user-select: none;
+      -webkit-user-select: none;
+    }
   </style>
 </head>
 <body class="min-h-screen relative bg-grid selection:bg-white selection:text-black">
@@ -139,6 +145,8 @@
           <div class="space-y-2">
             <label class="block font-mono text-xs text-neutral-400 uppercase">Security Key (Password)</label>
             <input type="password" id="createPassword" class="tech-input font-mono w-full px-4 py-3 text-sm text-white placeholder-neutral-600 rounded-sm" placeholder="••••••••••••">
+            <div id="passwordStrengthBar" class="h-1 rounded-sm transition-all duration-300 mt-2" style="width:0;background:#333;"></div>
+            <p id="passwordStrengthText" class="font-mono text-[10px] text-neutral-600 mt-1"></p>
           </div>
 
           <button type="submit" class="btn-solid w-full py-4 text-sm font-semibold uppercase tracking-wider rounded-sm mt-4">
@@ -202,7 +210,7 @@
           </div>
           <label class="font-mono text-xs text-neutral-400 uppercase">Decryption Key</label>
           <div class="flex gap-2">
-            <input type="text" id="displayPassword" class="tech-input font-mono flex-1 px-4 py-3 text-sm text-amber-100 rounded-sm border-amber-900/50 bg-amber-950/10" readonly>
+            <input type="text" id="displayPassword" class="tech-input font-mono flex-1 px-4 py-3 text-sm text-amber-100 rounded-sm border-amber-900/50 bg-amber-950/10 no-select" readonly>
             <button type="button" id="copyPassword" class="btn-outline px-6 py-3 font-mono text-sm uppercase rounded-sm">
               Copy
             </button>
@@ -227,17 +235,48 @@
     })();
 
     function generateRoomId() {
-      // Made the hash look a bit more "technical"
       const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+      const randomValues = new Uint32Array(8);
+      crypto.getRandomValues(randomValues);
       let result = '';
-      for (let i = 0; i < 4; i++) result += chars.charAt(Math.floor(Math.random() * chars.length));
+      for (let i = 0; i < 4; i++) result += chars.charAt(randomValues[i] % chars.length);
       result += '-';
-      for (let i = 0; i < 4; i++) result += chars.charAt(Math.floor(Math.random() * chars.length));
+      for (let i = 4; i < 8; i++) result += chars.charAt(randomValues[i] % chars.length);
       return result;
     }
 
     document.getElementById('generateId').addEventListener('click', () => {
       document.getElementById('createRoomId').value = generateRoomId();
+    });
+
+    // Password strength meter
+    function calculatePasswordStrength(password) {
+      if (!password) return { score: 0, label: '', color: '#333' };
+      let score = 0;
+      if (password.length >= 8) score++;
+      if (password.length >= 12) score++;
+      if (password.length >= 16) score++;
+      if (/[a-z]/.test(password) && /[A-Z]/.test(password)) score++;
+      if (/\d/.test(password)) score++;
+      if (/[^a-zA-Z0-9]/.test(password)) score++;
+      // Entropy estimation
+      const charsetSize = (/[a-z]/.test(password) ? 26 : 0) + (/[A-Z]/.test(password) ? 26 : 0) + (/\d/.test(password) ? 10 : 0) + (/[^a-zA-Z0-9]/.test(password) ? 32 : 0);
+      const entropy = password.length * Math.log2(charsetSize || 1);
+      if (entropy >= 60) score++;
+      if (entropy >= 80) score++;
+      const labels = ['Very Weak', 'Weak', 'Fair', 'Good', 'Strong', 'Very Strong'];
+      const colors = ['#ef4444', '#f97316', '#eab308', '#84cc16', '#22c55e', '#10b981'];
+      const idx = Math.min(Math.floor(score / 1.5), labels.length - 1);
+      return { score: Math.min(score, 9), label: labels[idx], color: colors[idx], entropy: Math.round(entropy) };
+    }
+    document.getElementById('createPassword').addEventListener('input', (e) => {
+      const result = calculatePasswordStrength(e.target.value);
+      const bar = document.getElementById('passwordStrengthBar');
+      const text = document.getElementById('passwordStrengthText');
+      bar.style.width = `${(result.score / 9) * 100}%`;
+      bar.style.background = result.color;
+      text.textContent = result.label ? `${result.label} (${result.entropy} bits)` : '';
+      text.style.color = result.color;
     });
 
     function showError(message) {
@@ -313,9 +352,8 @@
           console.log('Mock camera access created');
         }
         
-        // Store password in sessionStorage for when we join our own room
+        // Store only roomId in sessionStorage (password never persisted)
         sessionStorage.setItem('shuntcall_roomId', roomId);
-        sessionStorage.setItem('shuntcall_password', password);
         
         // Create share link (no password in URL!)
         const baseUrl = window.location.origin + window.location.pathname.replace(/\/[^\/]*$/, '/');
@@ -353,7 +391,6 @@
         enterBtn.textContent = 'Force Enter (Audio/Video issues detected)';
         enterBtn.onclick = () => {
           sessionStorage.setItem('shuntcall_roomId', roomId);
-          sessionStorage.setItem('shuntcall_password', password);
           window.location.href = shareLink;
         };
         document.getElementById('shareSection').appendChild(enterBtn);
@@ -380,7 +417,24 @@
         return;
       }
 
-      window.location.href = joinLink;
+      // Validate URL to prevent open redirect attacks
+      try {
+        const url = new URL(joinLink, window.location.origin);
+        const isSameOrigin = url.origin === window.location.origin;
+        const isRoomPath = url.pathname.includes('room.html');
+        if (!isSameOrigin || !isRoomPath) {
+          showError('Invalid connection URI. Only room links from this domain are accepted.');
+          return;
+        }
+        window.location.href = url.href;
+      } catch {
+        // Try as relative path
+        if (joinLink.startsWith('room.html')) {
+          window.location.href = joinLink;
+        } else {
+          showError('Invalid connection URI format.');
+        }
+      }
     });
 
     // Helper for copy buttons to maintain aesthetic

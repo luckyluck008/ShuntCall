@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' wss://nos.lol wss://njump.me wss://relay.primal.net wss://relay.snort.social wss://nostr.wine; img-src 'self' blob: data:; media-src 'self' blob:;">
   <title>ShuntCall - Protocol Room</title>
   
   <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
@@ -81,10 +82,86 @@
       color: #000000;
       border-color: #ffffff;
     }
+
+    /* Connection quality overlay */
+    .quality-badge {
+      padding: 2px 6px;
+      border-radius: 2px;
+      font-size: 9px;
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .quality-good { color: #4ade80; border: 1px solid #166534; background: rgba(22,101,52,0.2); }
+    .quality-medium { color: #facc15; border: 1px solid #854d0e; background: rgba(133,77,14,0.2); }
+    .quality-poor { color: #f87171; border: 1px solid #991b1b; background: rgba(153,27,27,0.2); }
+
+    /* File transfer notification */
+    .file-transfer-bar {
+      height: 3px;
+      background: #333;
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    .file-transfer-bar-fill {
+      height: 100%;
+      background: #fff;
+      transition: width 0.3s ease;
+    }
+
+    /* Copy protection: prevent selection on sensitive UI */
+    .no-select {
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    /* Screenshot protection overlay */
+    #screenshotOverlay {
+      position: fixed;
+      inset: 0;
+      background: #000;
+      z-index: 200;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      color: #666;
+      text-transform: uppercase;
+      letter-spacing: 0.2em;
+    }
+
+    /* Mobile responsive */
+    @media (max-width: 768px) {
+      .toolbar-btn {
+        width: 44px !important;
+        height: 44px !important;
+      }
+      #chatPanel {
+        width: 100% !important;
+      }
+      #debugPanel {
+        right: 1rem !important;
+        left: 1rem !important;
+        max-width: none !important;
+      }
+      header .max-w-\[1600px\] {
+        padding: 0 1rem;
+      }
+    }
+
+    @media (max-width: 480px) {
+      .toolbar-btn {
+        width: 40px !important;
+        height: 40px !important;
+      }
+      #togglePiP, #shareFile {
+        display: none !important;
+      }
+    }
   </style>
 </head>
 <body class="bg-grid selection:bg-white selection:text-black h-screen overflow-hidden flex flex-col relative">
   
+  <div id="screenshotOverlay">Session Paused — Tab Hidden</div>
   <div id="passwordModal" class="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-[100] hidden">
     <div class="bg-black border border-neutral-800 p-8 max-w-sm w-full relative group">
       <div class="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-white/20 to-transparent"></div>
@@ -95,7 +172,9 @@
       </div>
       
       <label class="block font-mono text-xs text-neutral-400 uppercase mb-2">Decryption Key required</label>
-      <input type="password" id="roomPassword" class="tech-input font-mono w-full px-4 py-3 text-sm text-white placeholder-neutral-600 rounded-sm mb-6" placeholder="••••••••••••">
+      <input type="password" id="roomPassword" class="tech-input font-mono w-full px-4 py-3 text-sm text-white placeholder-neutral-600 rounded-sm mb-2" placeholder="••••••••••••">
+      <div id="roomPwStrengthBar" class="h-1 rounded-sm transition-all duration-300 mb-1" style="width:0;background:#333;"></div>
+      <p id="roomPwStrengthText" class="font-mono text-[10px] text-neutral-600 mb-4"></p>
       
       <button id="submitPassword" class="btn-solid w-full py-4 text-sm font-semibold uppercase tracking-wider rounded-sm">
         Authenticate
@@ -122,7 +201,7 @@
             <h1 class="text-lg font-semibold tracking-tight text-white mb-1">ShuntCall</h1>
             <div class="flex items-center gap-2 font-mono text-xs">
               <span class="text-neutral-500">ID:</span>
-              <span id="roomIdDisplay" class="text-white bg-white/10 px-2 py-0.5 rounded-sm"></span>
+              <span id="roomIdDisplay" class="text-white bg-white/10 px-2 py-0.5 rounded-sm no-select"></span>
             </div>
           </div>
         </div>
@@ -132,6 +211,7 @@
             <span id="peerCount" class="text-neutral-300">0 Peers</span>
           </div>
           <button id="toggleDebug" class="btn-outline px-3 py-1.5 rounded-sm text-neutral-400 hover:text-white">SYS.DBG</button>
+          <button id="toggleRelays" class="btn-outline px-3 py-1.5 rounded-sm text-neutral-400 hover:text-white">RELAYS</button>
         </div>
       </div>
     </header>
@@ -146,12 +226,12 @@
             <div class="absolute inset-x-0 bottom-0 p-4 video-overlay flex justify-between items-end opacity-0 group-hover:opacity-100 transition-opacity duration-300">
               <div class="font-mono">
                 <span class="text-[10px] text-neutral-500 block mb-1">LOCAL_NODE</span>
-                <span class="text-sm text-white">You</span>
+                <input type="text" id="nicknameInput" class="bg-transparent border-b border-neutral-600 text-sm text-white w-32 focus:border-white focus:outline-none placeholder-neutral-500" placeholder="Set nickname..." maxlength="32">
               </div>
                 <div class="flex items-center gap-3">
                 <select id="liveQualitySelector" class="bg-black/60 border border-neutral-600 text-neutral-300 text-[10px] font-mono px-2 py-1 rounded-sm focus:border-white focus:outline-none cursor-pointer">
                 </select>
-                <span class="text-[10px] text-neutral-500 font-mono">TX/RX OK</span>
+                <span id="localConnectionStatus" class="text-[10px] text-neutral-500 font-mono">TX/RX OK</span>
                 <span class="w-2 h-2 rounded-full bg-white shadow-[0_0_8px_rgba(255,255,255,0.8)]"></span>
               </div>
             </div>
@@ -184,12 +264,60 @@
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path>
           </svg>
         </button>
+        <button id="toggleChat" class="w-14 h-14 flex items-center justify-center bg-transparent border border-transparent text-white hover:bg-neutral-800 transition-colors rounded-sm relative" title="Chat">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path>
+          </svg>
+          <span id="chatBadge" class="hidden absolute -top-1 -right-1 w-5 h-5 bg-white text-black text-[10px] font-mono font-bold rounded-full flex items-center justify-center">0</span>
+        </button>
+        <button id="shareFile" class="w-14 h-14 flex items-center justify-center bg-transparent border border-transparent text-white hover:bg-neutral-800 transition-colors rounded-sm" title="Share File">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"></path>
+          </svg>
+        </button>
         <div class="w-px h-8 bg-neutral-800 self-center mx-2"></div>
         <button id="leaveRoom" class="w-14 h-14 flex items-center justify-center bg-transparent border border-transparent text-red-500 hover:bg-red-950/50 hover:text-red-400 transition-colors rounded-sm" title="Disconnect">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M16 8l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2M5 3a2 2 0 00-2 2v1c0 8.284 6.716 15 15 15h1a2 2 0 002-2v-3.28a1 1 0 00-.684-.948l-4.493-1.498a1 1 0 00-1.21.502l-1.13 2.257a11.042 11.042 0 01-5.516-5.517l2.257-1.128a1 1 0 00.502-1.21L9.228 3.683A1 1 0 008.279 3H5z"></path>
           </svg>
         </button>
+      </div>
+    </div>
+
+    <div id="chatPanel" class="fixed top-0 right-0 h-full w-80 bg-black/95 backdrop-blur-xl border-l border-neutral-800 transform translate-x-full transition-transform duration-300 z-50 flex flex-col">
+      <div class="flex items-center justify-between p-4 border-b border-neutral-800">
+        <div class="flex items-center gap-2">
+          <svg class="w-4 h-4 text-neutral-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path>
+          </svg>
+          <h3 class="font-medium text-white uppercase tracking-wider text-sm">Encrypted Chat</h3>
+        </div>
+        <div class="flex items-center gap-2">
+          <button id="clearChat" class="text-neutral-500 hover:text-white transition-colors text-[10px] font-mono uppercase" title="Clear chat history">
+            Clear
+          </button>
+          <button id="closeChat" class="text-neutral-400 hover:text-white transition-colors">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M6 18L18 6M6 6l12 12"></path>
+            </svg>
+          </button>
+        </div>
+      </div>
+      <div id="chatMessages" class="flex-1 overflow-y-auto p-4 space-y-2 font-mono text-xs"></div>
+      <div class="p-4 border-t border-neutral-800">
+        <div class="flex gap-2 mb-2">
+          <input id="chatInput" type="text" class="tech-input flex-1 px-3 py-2 text-sm text-white placeholder-neutral-600 rounded-sm font-mono" placeholder="Type a message...">
+          <button id="chatSend" class="btn-solid px-4 py-2 text-xs font-semibold uppercase tracking-wider rounded-sm">Send</button>
+        </div>
+        <div class="flex items-center justify-between">
+          <p class="text-[10px] text-neutral-600 font-mono">E2E encrypted via DataChannel</p>
+          <select id="chatExpiry" class="bg-black/60 border border-neutral-700 text-neutral-400 text-[9px] font-mono px-2 py-0.5 rounded-sm focus:border-white focus:outline-none cursor-pointer">
+            <option value="0">No expiry</option>
+            <option value="30">30s</option>
+            <option value="60">60s</option>
+            <option value="300">5min</option>
+          </select>
+        </div>
       </div>
     </div>
 
@@ -201,6 +329,20 @@
         <h3 class="font-medium text-white uppercase tracking-wider">System Log</h3>
       </div>
       <div id="debugContent" class="text-neutral-400 space-y-2 max-h-64 overflow-y-auto pr-2 custom-scrollbar"></div>
+    </div>
+
+    <div id="relayPanel" class="fixed bottom-28 left-6 bg-black/95 backdrop-blur-xl p-6 rounded-sm text-xs font-mono hidden max-w-sm border border-neutral-800 shadow-2xl z-50">
+      <div class="flex items-center gap-2 mb-4 border-b border-neutral-800 pb-3">
+        <svg class="w-4 h-4 text-neutral-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2"></path>
+        </svg>
+        <h3 class="font-medium text-white uppercase tracking-wider">Nostr Relays</h3>
+      </div>
+      <div id="relayList" class="text-neutral-400 space-y-1 max-h-48 overflow-y-auto mb-4 pr-2"></div>
+      <div class="flex gap-2">
+        <input type="text" id="newRelayUrl" class="tech-input flex-1 px-2 py-1.5 text-xs text-white placeholder-neutral-600 rounded-sm" placeholder="wss://relay.example.com">
+        <button id="addRelayBtn" class="btn-solid px-3 py-1.5 text-[10px] font-semibold uppercase rounded-sm">Add</button>
+      </div>
     </div>
   </div>
 
@@ -239,6 +381,16 @@
       webrtc: null,
       isAudioEnabled: true,
       isVideoEnabled: true,
+      isScreenSharing: false,
+      screenTrack: null,
+      peerMuteStates: new Map(),
+      chatMessages: [],
+      chatOpen: false,
+      nickname: '',
+      peerNicknames: new Map(),
+      encryptionKey: null,
+      fileTransfers: new Map(),
+      chatExpiry: 0,
 
       async init() {
         const params = new URLSearchParams(window.location.search);
@@ -255,24 +407,14 @@
       },
 
       setupPasswordModal() {
-        // Check if password is in sessionStorage
-        const storedPassword = sessionStorage.getItem('shuntcall_password');
+        // Check for room hash in URL (password never stored in sessionStorage)
         const storedRoomId = sessionStorage.getItem('shuntcall_roomId');
         
-        console.log('Stored password:', storedPassword ? 'yes' : 'no');
-        console.log('Stored roomId:', storedRoomId);
-        
-        if (storedPassword && storedRoomId === this.roomId) {
-          console.log('Using stored password');
-          this.password = storedPassword;
+        if (storedRoomId === this.roomId) {
           sessionStorage.removeItem('shuntcall_roomId');
-          sessionStorage.removeItem('shuntcall_password');
-          document.getElementById('passwordModal').style.display = 'none';
-          this.initRoom();
-          return;
         }
 
-        // Show the modal
+        // Always show the password modal — password is never persisted
         document.getElementById('passwordModal').style.display = 'flex';
         document.getElementById('passwordModal').classList.remove('hidden');
         
@@ -297,6 +439,31 @@
           if (e.key === 'Enter') {
             submit.click();
           }
+        });
+
+        // Password strength meter for room password
+        input.addEventListener('input', (e) => {
+          const pw = e.target.value;
+          let score = 0;
+          if (pw.length >= 8) score++;
+          if (pw.length >= 12) score++;
+          if (pw.length >= 16) score++;
+          if (/[a-z]/.test(pw) && /[A-Z]/.test(pw)) score++;
+          if (/\d/.test(pw)) score++;
+          if (/[^a-zA-Z0-9]/.test(pw)) score++;
+          const charsetSize = (/[a-z]/.test(pw) ? 26 : 0) + (/[A-Z]/.test(pw) ? 26 : 0) + (/\d/.test(pw) ? 10 : 0) + (/[^a-zA-Z0-9]/.test(pw) ? 32 : 0);
+          const entropy = pw.length * Math.log2(charsetSize || 1);
+          if (entropy >= 60) score++;
+          if (entropy >= 80) score++;
+          const labels = ['Very Weak', 'Weak', 'Fair', 'Good', 'Strong', 'Very Strong'];
+          const colors = ['#ef4444', '#f97316', '#eab308', '#84cc16', '#22c55e', '#10b981'];
+          const idx = Math.min(Math.floor(score / 1.5), labels.length - 1);
+          const bar = document.getElementById('roomPwStrengthBar');
+          const text = document.getElementById('roomPwStrengthText');
+          bar.style.width = `${(score / 9) * 100}%`;
+          bar.style.background = colors[idx];
+          text.textContent = pw ? `${labels[idx]} (${Math.round(entropy)} bits)` : '';
+          text.style.color = colors[idx];
         });
       },
 
@@ -346,26 +513,48 @@
               
               this.populateLiveQualitySelector();
               
-              // Initialize Relay Tree
+            // Initialize Relay Tree
              this.relayTree = ShuntCallRelayTree;
              this.relayTree.init(ourPubkey, this.webrtc);
              
-             // Setup signaling presence listener
-             this.signaling.on('presence', async (data) => {
-               console.log('Room: Received presence from', data.from.slice(0, 16) + '...');
-               await this.webrtc.handlePresence(data.from);
-             });
-
-             // Setup WebRTC event handlers
-             this.webrtc.on('remoteStream', (data) => {
-               console.log('Remote stream from:', data.peerId.slice(0, 16) + '...');
-               this.addRemoteStream(data.peerId, data.stream);
-             });
+             // Derive E2E encryption key from room password
+             await this.deriveEncryptionKey();
              
-             this.webrtc.on('peerDisconnected', (data) => {
-               console.log('Peer disconnected:', data.peerId.slice(0, 16) + '...');
-               this.removePeer(data.peerId);
-             });
+             // Restore session state if reconnecting
+             this.restoreSessionState();
+             
+              // Setup WebRTC event handlers
+              this.webrtc.on('remoteStream', (data) => {
+                console.log('Remote stream from:', data.peerId.slice(0, 16) + '...');
+                this.addRemoteStream(data.peerId, data.stream, data.isFirstTrack);
+                
+                // Relay forwarding: if we have children in the tree, forward this stream
+                const ourNode = this.relayTree.tree[this.signaling?.nostr?.keys?.publicKey];
+                if (ourNode && ourNode.children.length > 0) {
+                  this.relayTree.startForwarding(data.peerId, data.stream);
+                }
+              });
+              
+              this.webrtc.on('peerDisconnected', (data) => {
+                console.log('Peer disconnected:', data.peerId.slice(0, 16) + '...');
+                this.removePeer(data.peerId);
+              });
+
+              // DataChannel handlers for mute sync and chat
+              this.webrtc.on('dataChannelMessage', (data) => {
+                this.handleDataChannelMessage(data.peerId, data.data);
+              });
+
+              this.webrtc.on('dataChannelOpen', (data) => {
+                console.log('DataChannel open with:', data.peerId.slice(0, 8));
+                this.addDebugMessage(`DATACHANNEL_OPEN: ${data.peerId.slice(0, 8)}`);
+                // Send current mute state to newly connected peer
+                this.webrtc.sendData(data.peerId, {
+                  type: 'mute-status',
+                  audioMuted: !this.isAudioEnabled,
+                  videoMuted: !this.isVideoEnabled
+                });
+              });
 
              // Relay Tree event handlers
              this.relayTree.on('peerAdded', (data) => {
@@ -375,6 +564,10 @@
                  hops: data.hops
                });
                this.addDebugMessage(`RELAY_PEER_ADDED: ${data.peerId.slice(0, 8)} (${data.hops}H)`);
+               // If this peer is our child, forward existing streams to it
+               if (data.parentId === this.signaling?.nostr?.keys?.publicKey) {
+                 this.relayTree.forwardToNewChild(data.peerId);
+               }
              });
              
              this.relayTree.on('peerRemoved', (data) => {
@@ -388,6 +581,16 @@
                  newParentId: data.newParentId?.slice(0, 8)
                });
                this.addDebugMessage(`RELAY_PEER_RECONNECTED: ${data.peerId.slice(0, 8)} → ${data.newParentId?.slice(0, 8)}`);
+             });
+             
+             this.relayTree.on('relayActivated', (data) => {
+               console.log('Relay activated for peer:', data.peerId.slice(0, 8));
+               this.addDebugMessage(`RELAY_ACTIVATED: ${data.peerId.slice(0, 8)}`);
+             });
+             
+             this.relayTree.on('forwardingStarted', (data) => {
+               console.log('Forwarding started from:', data.sourcePeerId.slice(0, 8), 'to', data.childrenCount, 'children');
+               this.addDebugMessage(`FORWARDING: ${data.sourcePeerId.slice(0, 8)} → ${data.childrenCount} peers`);
              });
              
              this.relayTree.on('treeReorganized', (data) => {
@@ -418,15 +621,47 @@
                this.addDebugMessage(`TRACK_ERROR: ${data.kind} from ${data.peerId.slice(0, 8)} - ${data.error}`);
              });
 
-             this.webrtc.on('trackEnded', (data) => {
-               console.log('Track ended:', data);
-               this.addDebugMessage(`TRACK_ENDED: ${data.kind} from ${data.peerId.slice(0, 8)}`);
+              this.webrtc.on('trackEnded', (data) => {
+                console.log('Track ended:', data);
+                this.addDebugMessage(`TRACK_ENDED: ${data.kind} from ${data.peerId.slice(0, 8)}`);
+              });
+
+              this.webrtc.on('ipLeakWarning', (data) => {
+                if (!this._ipLeakShown) {
+                  this._ipLeakShown = true;
+                  this.showIpLeakWarning(data.ip);
+                }
+              });
+
+              this.webrtc.on('connectionStateChange', (data) => {
+                console.log('Connection state:', data.peerId?.slice(0, 16), data.state);
+                this.updatePeerStatus(data.peerId, data.state);
+                this.addDebugMessage(`CONNECTION_STATE: ${data.peerId?.slice(0, 8)} - ${data.state}`);
+              });
+
+             // Peer timeout/disconnect handlers
+             this.signaling.on('peerTimedOut', (data) => {
+               console.log('Peer timed out:', data.pubkey.slice(0, 16));
+               this.addDebugMessage(`PEER_TIMEOUT: ${data.pubkey.slice(0, 8)}`);
+               this.removePeer(data.pubkey);
              });
 
-             this.webrtc.on('connectionStateChange', (data) => {
-               console.log('Connection state:', data.peerId?.slice(0, 16), data.state);
-               this.updatePeerStatus(data.peerId, data.state);
-               this.addDebugMessage(`CONNECTION_STATE: ${data.peerId?.slice(0, 8)} - ${data.state}`);
+             this.signaling.on('peerLeft', (data) => {
+               console.log('Peer left room:', data.from.slice(0, 16));
+               this.addDebugMessage(`PEER_LEFT: ${data.from.slice(0, 8)}`);
+               this.removePeer(data.from);
+             });
+
+             this.signaling.on('nickname', (data) => {
+               console.log('Nickname received:', data.from.slice(0, 8), data.nickname);
+               this.updatePeerNickname(data.from, data.nickname);
+             });
+
+             // Setup leave broadcast on page unload
+             window.addEventListener('beforeunload', () => {
+               if (this.signaling) {
+                 this.signaling.broadcastLeave();
+               }
              });
 
             // Broadcast our presence
@@ -439,6 +674,7 @@
 
            this.setupEventListeners();
            this.updatePeerCount();
+           this.saveSessionState();
 
            document.getElementById('loadingScreen').classList.add('hidden');
            document.getElementById('room').classList.remove('hidden');
@@ -460,13 +696,106 @@
          }
        },
 
-      async computeRoomTag(roomId, password) {
-        const input = roomId + ':' + password;
-        const encoder = new TextEncoder();
-        const data = encoder.encode(input);
-        const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-        const hashArray = Array.from(new Uint8Array(hashBuffer));
-        return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+       async computeRoomTag(roomId, password) {
+        return ShuntCallCrypto.deriveNamespace(roomId, password);
+      },
+
+      async deriveEncryptionKey() {
+        try {
+          const keyMaterial = await crypto.subtle.importKey(
+            'raw',
+            new TextEncoder().encode(this.password),
+            'PBKDF2',
+            false,
+            ['deriveKey']
+          );
+          this.encryptionKey = await crypto.subtle.deriveKey(
+            {
+              name: 'PBKDF2',
+              salt: new TextEncoder().encode('shuntcall-e2e-' + this.roomId),
+              iterations: 100000,
+              hash: 'SHA-256'
+            },
+            keyMaterial,
+            { name: 'AES-GCM', length: 256 },
+            false,
+            ['encrypt', 'decrypt']
+          );
+          console.log('E2E encryption key derived');
+        } catch (error) {
+          console.error('Failed to derive encryption key:', error);
+        }
+      },
+
+      async encryptMessage(plaintext) {
+        if (!this.encryptionKey) {
+          console.error('Cannot encrypt: no encryption key available');
+          return null;
+        }
+        try {
+          const iv = crypto.getRandomValues(new Uint8Array(12));
+          const encrypted = await crypto.subtle.encrypt(
+            { name: 'AES-GCM', iv },
+            this.encryptionKey,
+            new TextEncoder().encode(plaintext)
+          );
+          const combined = new Uint8Array(iv.length + encrypted.byteLength);
+          combined.set(iv);
+          combined.set(new Uint8Array(encrypted), iv.length);
+          return btoa(String.fromCharCode(...combined));
+        } catch (error) {
+          console.error('Encryption failed:', error);
+          return null;
+        }
+      },
+
+      async decryptMessage(ciphertext) {
+        if (!this.encryptionKey) {
+          return '[Decryption failed: no key]';
+        }
+        try {
+          const combined = new Uint8Array(atob(ciphertext).split('').map(c => c.charCodeAt(0)));
+          const iv = combined.slice(0, 12);
+          const encrypted = combined.slice(12);
+          const decrypted = await crypto.subtle.decrypt(
+            { name: 'AES-GCM', iv },
+            this.encryptionKey,
+            encrypted
+          );
+          return new TextDecoder().decode(decrypted);
+        } catch (error) {
+          return '[Decryption failed]';
+        }
+      },
+
+      saveSessionState() {
+        try {
+          sessionStorage.setItem('shuntcall_session', JSON.stringify({
+            roomId: this.roomId,
+            nickname: this.nickname,
+            timestamp: Date.now()
+          }));
+        } catch (error) {
+          console.warn('Failed to save session state:', error);
+        }
+      },
+
+      restoreSessionState() {
+        try {
+          const session = JSON.parse(sessionStorage.getItem('shuntcall_session'));
+          if (session && session.roomId === this.roomId && Date.now() - session.timestamp < 300000) {
+            if (session.nickname) {
+              this.nickname = session.nickname;
+              const input = document.getElementById('nicknameInput');
+              if (input) input.value = session.nickname;
+              this.signaling.setNickname(session.nickname);
+            }
+            console.log('Session state restored');
+          }
+          sessionStorage.removeItem('shuntcall_session');
+        } catch (error) {
+          console.warn('Failed to restore session state:', error);
+        }
       },
 
       showLoading(text) {
@@ -810,8 +1139,42 @@
          }, 5000);
        },
 
-         addRemoteStream(peerId, stream) {
-           if (this.peers.has(peerId)) return;
+       showIpLeakWarning(ip) {
+         this.addDebugMessage(`IP_LEAK: Local IP ${ip} exposed via ICE host candidate`);
+         const modal = document.createElement('div');
+         modal.className = 'fixed top-6 left-6 bg-black/95 backdrop-blur-md border border-amber-900/50 p-5 z-[110] max-w-sm';
+         modal.innerHTML = `
+           <div class="flex items-start gap-3">
+             <span class="font-mono text-xs text-amber-500 border border-amber-900 px-2 py-1 flex-shrink-0">PRIVACY</span>
+             <div>
+               <p class="text-amber-300 text-sm mb-2">Local IP address may be visible to peers via WebRTC.</p>
+               <p class="text-neutral-500 text-xs font-mono">Use a VPN or Tor for enhanced privacy.</p>
+             </div>
+             <button class="text-neutral-500 hover:text-white ml-2" onclick="this.closest('.fixed').remove()">
+               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M6 18L18 6M6 6l12 12"></path></svg>
+             </button>
+           </div>
+         `;
+         document.body.appendChild(modal);
+         setTimeout(() => { if (modal.parentNode) modal.remove(); }, 15000);
+       },
+
+         addRemoteStream(peerId, stream, isFirstTrack) {
+           // If peer already exists and this is a new track, update the existing video element
+           if (this.peers.has(peerId)) {
+             const peer = this.peers.get(peerId);
+             if (peer && peer.video) {
+               // Update the stream reference
+               peer.stream = stream;
+               peer.video.srcObject = stream;
+               console.log('Updated existing peer stream with new track:', {
+                 peerId: peerId.slice(0, 8),
+                 tracks: stream.getTracks().map(t => t.kind)
+               });
+             }
+             this.updatePeerCount();
+             return;
+           }
           
           console.log('Adding remote stream:', {
             peerId: peerId.slice(0, 8),
@@ -831,11 +1194,24 @@
           container.className = 'relative bg-neutral-900 border border-neutral-800 aspect-video group overflow-hidden rounded-sm';
           container.id = `container-${peerId}`;
 
-          const video = document.createElement('video');
-          video.autoplay = true;
-          video.playsInline = true;
-          video.srcObject = stream;
-          video.className = 'w-full h-full object-cover';
+           const video = document.createElement('video');
+           video.autoplay = true;
+           video.playsInline = true;
+           video.srcObject = stream;
+           video.className = 'w-full h-full object-cover';
+           
+           // Attempt to play - handle autoplay policy
+           video.play().catch(() => {
+             // Autoplay blocked - will play after first user interaction
+             console.log('Autoplay blocked for remote video - waiting for user interaction');
+             const playOnInteraction = () => {
+               video.play().catch(() => {});
+               document.removeEventListener('click', playOnInteraction);
+               document.removeEventListener('keydown', playOnInteraction);
+             };
+             document.addEventListener('click', playOnInteraction, { once: true });
+             document.addEventListener('keydown', playOnInteraction, { once: true });
+           });
           
           // Add video element error handling
           video.onerror = (e) => {
@@ -863,21 +1239,28 @@
          overlay.className = 'absolute inset-x-0 bottom-0 p-4 video-overlay flex justify-between items-end opacity-0 group-hover:opacity-100 transition-opacity duration-300';
 
          overlay.innerHTML = `
-           <div class="font-mono">
-             <span class="text-[10px] text-neutral-500 block mb-1">REMOTE_NODE</span>
-             <span class="text-sm text-white">${peerId.slice(0, 8)}...</span>
-           </div>
+            <div class="font-mono">
+              <span class="text-[10px] text-neutral-500 block mb-1">REMOTE_NODE</span>
+              <span class="text-sm text-white" id="nickname-${peerId}">${peerId.slice(0, 8)}...</span>
+            </div>
            <div class="flex items-center gap-2">
+             <span id="mute-audio-${peerId}" class="hidden" title="Microphone muted">
+               <svg class="w-4 h-4 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2"></path></svg>
+             </span>
+             <span id="mute-video-${peerId}" class="hidden" title="Camera muted">
+               <svg class="w-4 h-4 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path><line x1="3" y1="3" x2="21" y2="21" stroke="currentColor" stroke-width="1.5"></line></svg>
+             </span>
+             <span id="quality-${peerId}" class="text-[10px] font-mono text-neutral-500"></span>
              <span class="text-[10px] text-neutral-500 font-mono">RX</span>
              <span class="w-2 h-2 rounded-full bg-neutral-600 transition-colors duration-300" id="status-${peerId}"></span>
            </div>
          `;
 
-         container.appendChild(video);
+          container.appendChild(video);
          container.appendChild(overlay);
          grid.appendChild(container);
          
-         this.peers.set(peerId, { stream, container });
+         this.peers.set(peerId, { stream, container, video });
          this.updatePeerCount();
          
          // Add peer to relay tree
@@ -929,36 +1312,356 @@
          document.getElementById('peerCount').textContent = `${count} Node${count !== 1 ? 's' : ''}`;
        },
 
-      setupEventListeners() {
-        document.getElementById('toggleMic').addEventListener('click', (e) => {
-          this.isAudioEnabled = !this.isAudioEnabled;
-          this.localStream.getAudioTracks().forEach(track => {
-            track.enabled = this.isAudioEnabled;
-          });
-          const btn = e.currentTarget;
-          if(this.isAudioEnabled) {
-            btn.classList.add('active', 'bg-white', 'text-black');
-            btn.classList.remove('bg-transparent', 'text-white');
-          } else {
-            btn.classList.remove('active', 'bg-white', 'text-black');
-            btn.classList.add('bg-transparent', 'text-white');
-          }
-        });
+       async handleDataChannelMessage(peerId, data) {
+          if (data.type === 'mute-status') {
+            this.peerMuteStates.set(peerId, {
+              audioMuted: data.audioMuted,
+              videoMuted: data.videoMuted
+            });
+            this.updatePeerMuteIndicator(peerId);
+            this.addDebugMessage(`MUTE_STATUS: ${peerId.slice(0, 8)} audio=${data.audioMuted ? 'OFF' : 'ON'} video=${data.videoMuted ? 'OFF' : 'ON'}`);
+           } else if (data.type === 'chat') {
+             const message = await this.decryptMessage(data.message);
+             const expiresAt = data.expiry > 0 ? Date.now() + data.expiry * 1000 : null;
+             this.addChatMessage(peerId, message, data.timestamp, expiresAt);
+          } else if (data.type === 'file-offer') {
+            this.handleFileOffer(peerId, data);
+           } else if (data.type === 'file-chunk') {
+             this.handleFileChunk(peerId, data);
+           } else if (data.type === 'chat-clear') {
+             this.chatMessages = [];
+             this.renderChatMessages();
+             this.addDebugMessage('CHAT_CLEARED by peer');
+           }
+        },
 
-        document.getElementById('toggleCamera').addEventListener('click', (e) => {
-          this.isVideoEnabled = !this.isVideoEnabled;
-          this.localStream.getVideoTracks().forEach(track => {
-            track.enabled = this.isVideoEnabled;
-          });
-          const btn = e.currentTarget;
-          if(this.isVideoEnabled) {
-            btn.classList.add('active', 'bg-white', 'text-black');
-            btn.classList.remove('bg-transparent', 'text-white');
-          } else {
-            btn.classList.remove('active', 'bg-white', 'text-black');
-            btn.classList.add('bg-transparent', 'text-white');
+       updatePeerMuteIndicator(peerId) {
+          const state = this.peerMuteStates.get(peerId);
+          if (!state) return;
+          const audioEl = document.getElementById(`mute-audio-${peerId}`);
+          const videoEl = document.getElementById(`mute-video-${peerId}`);
+          if (audioEl) audioEl.classList.toggle('hidden', !state.audioMuted);
+          if (videoEl) videoEl.classList.toggle('hidden', !state.videoMuted);
+        },
+
+        updatePeerNickname(peerId, nickname) {
+          const peer = this.peers.get(peerId);
+          if (peer) {
+            peer.nickname = nickname;
+            const nameEl = document.getElementById(`nickname-${peerId}`);
+            if (nameEl) {
+              nameEl.textContent = nickname;
+            }
           }
-        });
+          this.addDebugMessage(`NICKNAME: ${peerId.slice(0, 8)} → ${nickname}`);
+        },
+
+       addChatMessage(peerId, message, timestamp, expiresAt) {
+         const time = timestamp || new Date().toISOString().split('T')[1].split('.')[0];
+         const msgObj = { peerId, message, timestamp: time, expiresAt: expiresAt || null };
+         this.chatMessages.push(msgObj);
+         if (expiresAt) this.scheduleExpiry(msgObj);
+         this.renderChatMessages();
+         if (!this.chatOpen) {
+           const badge = document.getElementById('chatBadge');
+           if (badge) {
+             badge.classList.remove('hidden');
+             badge.textContent = parseInt(badge.textContent || '0') + 1;
+           }
+         }
+       },
+
+       scheduleExpiry(msgObj) {
+         if (!msgObj.expiresAt) return;
+         const delay = msgObj.expiresAt - Date.now();
+         if (delay <= 0) return;
+         setTimeout(() => {
+           const idx = this.chatMessages.indexOf(msgObj);
+           if (idx !== -1) {
+             this.chatMessages.splice(idx, 1);
+             this.renderChatMessages();
+           }
+         }, delay);
+       },
+
+       async sendChatMessage(message) {
+          if (!message.trim()) return;
+          const timestamp = new Date().toISOString().split('T')[1].split('.')[0];
+          const encryptedMessage = await this.encryptMessage(message.trim());
+          if (!encryptedMessage) {
+            this.addChatMessage('self', '[Message not sent: encryption failed]', timestamp);
+            return;
+          }
+          const expiry = this.chatExpiry;
+          const data = { type: 'chat', message: encryptedMessage, timestamp, expiry };
+          this.webrtc.broadcastData(data);
+          const msgObj = { peerId: 'self', message: message.trim(), timestamp, expiresAt: expiry > 0 ? Date.now() + expiry * 1000 : null };
+          this.chatMessages.push(msgObj);
+          if (expiry > 0) this.scheduleExpiry(msgObj);
+          this.renderChatMessages();
+        },
+
+       renderChatMessages() {
+         const container = document.getElementById('chatMessages');
+         if (!container) return;
+         container.innerHTML = this.chatMessages.map(msg => {
+           const isSelf = msg.peerId === 'self';
+           const label = isSelf ? 'You' : msg.peerId.slice(0, 8) + '...';
+           return `<div class="mb-2 ${isSelf ? 'text-right' : ''}">
+             <span class="text-[10px] text-neutral-500 font-mono">${msg.timestamp} ${label}</span>
+             <div class="text-sm ${isSelf ? 'text-white bg-white/10' : 'text-neutral-300 bg-neutral-900'} inline-block px-3 py-1.5 rounded-sm mt-0.5 max-w-[85%] break-words">${this.escapeHtml(msg.message)}</div>
+           </div>`;
+         }).join('');
+         container.scrollTop = container.scrollHeight;
+       },
+
+       renderRelayList() {
+         const container = document.getElementById('relayList');
+         if (!container || !this.signaling?.nostr) return;
+         const relays = this.signaling.nostr.getAllRelays();
+         container.innerHTML = relays.map(r => {
+           const statusColor = r.connected ? '#4ade80' : '#f87171';
+           const statusText = r.connected ? 'ON' : 'OFF';
+           const msgs = r.health ? `${r.health.messagesReceived}↓ ${r.health.messagesSent}↑` : '';
+           const errs = r.health?.errors ? ` err:${r.health.errors}` : '';
+           const latency = r.health?.lastMessage ? `${Math.round((Date.now() - r.health.lastMessage) / 1000)}s ago` : '';
+           return `<div class="flex items-center justify-between py-1 border-b border-neutral-900">
+             <div class="flex items-center gap-2 flex-1 min-w-0">
+               <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" style="background:${statusColor}"></span>
+               <span class="text-[10px] truncate" title="${r.url}">${r.url.replace('wss://', '')}</span>
+             </div>
+             <div class="flex items-center gap-2 flex-shrink-0 ml-2">
+               <span class="text-[9px] text-neutral-500">${msgs}${errs}</span>
+               <span class="text-[9px]" style="color:${statusColor}">${statusText}</span>
+             </div>
+           </div>`;
+         }).join('');
+       },
+
+       sendFile(file) {
+          if (!file || !this.webrtc) return;
+          
+          // Determine safe chunk size based on DataChannel maxMessageSize
+          let CHUNK_SIZE = 16384;
+          try {
+            const samplePc = Object.values(this.webrtc.peerConnections)[0];
+            if (samplePc && samplePc.sctp) {
+              const maxMsgSize = samplePc.sctp.maxMessageSize || 65535;
+              // base64 inflates by ~33%, leave margin for JSON overhead
+              CHUNK_SIZE = Math.min(CHUNK_SIZE, Math.floor(maxMsgSize * 0.6));
+            }
+          } catch (e) {
+            // fallback to safe default
+          }
+          
+          const fileId = crypto.getRandomValues(new Uint8Array(8)).reduce((s, b) => s + b.toString(16).padStart(2, '0'), '');
+          
+          const fileData = {
+            id: fileId,
+            name: file.name,
+            size: file.size,
+            type: file.type,
+            chunks: Math.ceil(file.size / CHUNK_SIZE)
+          };
+          
+          // Broadcast file offer to all peers
+          this.webrtc.broadcastData({ type: 'file-offer', ...fileData });
+          this.addChatMessage('self', `Sharing file: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`, new Date().toISOString().split('T')[1].split('.')[0]);
+          
+          // Read and send file in chunks
+          const reader = new FileReader();
+          let offset = 0;
+          let chunkIndex = 0;
+          
+          reader.onload = (e) => {
+            const chunk = btoa(String.fromCharCode(...new Uint8Array(e.target.result)));
+            this.webrtc.broadcastData({
+              type: 'file-chunk',
+              id: fileId,
+              index: chunkIndex,
+              data: chunk,
+              last: offset + CHUNK_SIZE >= file.size
+            });
+            chunkIndex++;
+            offset += CHUNK_SIZE;
+            if (offset < file.size) {
+              readSlice(offset);
+            }
+          };
+          
+          const readSlice = (off) => {
+            const slice = file.slice(off, Math.min(off + CHUNK_SIZE, file.size));
+            reader.readAsArrayBuffer(slice);
+          };
+          
+          readSlice(0);
+        },
+
+        handleFileOffer(peerId, data) {
+          this.fileTransfers.set(data.id, {
+            meta: data,
+            peerId,
+            chunks: [],
+            received: 0
+          });
+          this.addChatMessage(peerId, `Sharing file: ${data.name} (${(data.size / 1024).toFixed(1)} KB)`, new Date().toISOString().split('T')[1].split('.')[0]);
+        },
+
+        handleFileChunk(peerId, data) {
+          const transfer = this.fileTransfers.get(data.id);
+          if (!transfer) return;
+          transfer.chunks[data.index] = data.data;
+          transfer.received++;
+          
+          if (data.last) {
+            // Reassemble file — chunks are base64-encoded, decode before byte extraction
+            const base64Str = transfer.chunks.join('');
+            const binaryStr = atob(base64Str);
+            const bytes = new Uint8Array(binaryStr.length);
+            for (let i = 0; i < binaryStr.length; i++) {
+              bytes[i] = binaryStr.charCodeAt(i);
+            }
+            const blob = new Blob([bytes], { type: transfer.meta.type });
+            const url = URL.createObjectURL(blob);
+            
+            // Show download link in chat
+            const time = new Date().toISOString().split('T')[1].split('.')[0];
+            const safeName = this.escapeHtml(transfer.meta.name);
+            const downloadLink = `<a href="${url}" download="${safeName}" class="underline text-blue-400 hover:text-blue-300">${safeName}</a>`;
+            const container = document.getElementById('chatMessages');
+            if (container) {
+              const div = document.createElement('div');
+              div.className = 'mb-2';
+              div.innerHTML = `<span class="text-[10px] text-neutral-500 font-mono">${time} ${peerId.slice(0, 8)}...</span><div class="text-sm text-neutral-300 bg-neutral-900 inline-block px-3 py-1.5 rounded-sm mt-0.5">File ready: ${downloadLink}</div>`;
+              container.appendChild(div);
+              container.scrollTop = container.scrollHeight;
+            }
+            
+            this.fileTransfers.delete(data.id);
+            this.addDebugMessage(`FILE_RECEIVED: ${transfer.meta.name}`);
+          }
+        },
+
+       escapeHtml(text) {
+         const div = document.createElement('div');
+         div.textContent = text;
+         return div.innerHTML;
+       },
+
+       broadcastMuteState() {
+         if (!this.webrtc) return;
+         this.webrtc.broadcastData({
+           type: 'mute-status',
+           audioMuted: !this.isAudioEnabled,
+           videoMuted: !this.isVideoEnabled
+         });
+       },
+
+       async getConnectionStats(peerId) {
+         if (!this.webrtc) return null;
+         const pc = this.webrtc.peerConnections[peerId];
+         if (!pc) return null;
+         try {
+           const stats = await pc.getStats();
+           const result = { roundTripTime: null, bytesReceived: 0, bytesSent: 0 };
+           stats.forEach(report => {
+             if (report.type === 'candidate-pair' && report.state === 'succeeded') {
+               result.roundTripTime = report.currentRoundTripTime;
+             }
+             if (report.type === 'inbound-rtp' && !report.isRemote) {
+               result.bytesReceived += report.bytesReceived || 0;
+             }
+             if (report.type === 'outbound-rtp' && !report.isRemote) {
+               result.bytesSent += report.bytesSent || 0;
+             }
+           });
+           return result;
+         } catch (e) {
+           return null;
+         }
+       },
+
+       async updateConnectionQualityDisplay() {
+         for (const [peerId] of this.peers) {
+           const stats = await this.getConnectionStats(peerId);
+           if (!stats) continue;
+           const el = document.getElementById(`quality-${peerId}`);
+           if (el) {
+             if (stats.roundTripTime !== null) {
+               const ms = Math.round(stats.roundTripTime * 1000);
+               el.textContent = `${ms}ms`;
+               el.className = 'text-[10px] font-mono ' + (ms < 100 ? 'text-green-400' : ms < 300 ? 'text-yellow-400' : 'text-red-400');
+             }
+           }
+         }
+       },
+
+       setupEventListeners() {
+          // Nickname input
+          const nicknameInput = document.getElementById('nicknameInput');
+          if (nicknameInput) {
+            let nicknameTimeout;
+            nicknameInput.addEventListener('input', (e) => {
+              clearTimeout(nicknameTimeout);
+              nicknameTimeout = setTimeout(() => {
+                const name = e.target.value.trim();
+                if (name && name !== this.nickname) {
+                  this.nickname = name;
+                  if (this.signaling) {
+                    this.signaling.setNickname(name);
+                  }
+                  this.saveSessionState();
+                }
+              }, 500);
+            });
+          }
+
+          // File sharing button
+          const shareFileBtn = document.getElementById('shareFile');
+          if (shareFileBtn) {
+            shareFileBtn.addEventListener('click', () => {
+              const input = document.createElement('input');
+              input.type = 'file';
+              input.onchange = () => {
+                if (input.files[0]) {
+                  this.sendFile(input.files[0]);
+                }
+              };
+              input.click();
+            });
+          }
+
+          document.getElementById('toggleMic').addEventListener('click', (e) => {
+           this.isAudioEnabled = !this.isAudioEnabled;
+           this.localStream.getAudioTracks().forEach(track => {
+             track.enabled = this.isAudioEnabled;
+           });
+           const btn = e.currentTarget;
+           if(this.isAudioEnabled) {
+             btn.classList.add('active', 'bg-white', 'text-black');
+             btn.classList.remove('bg-transparent', 'text-white');
+           } else {
+             btn.classList.remove('active', 'bg-white', 'text-black');
+             btn.classList.add('bg-transparent', 'text-white');
+           }
+           this.broadcastMuteState();
+         });
+
+          document.getElementById('toggleCamera').addEventListener('click', (e) => {
+            this.isVideoEnabled = !this.isVideoEnabled;
+           this.localStream.getVideoTracks().forEach(track => {
+             track.enabled = this.isVideoEnabled;
+           });
+           const btn = e.currentTarget;
+           if(this.isVideoEnabled) {
+             btn.classList.add('active', 'bg-white', 'text-black');
+             btn.classList.remove('bg-transparent', 'text-white');
+           } else {
+             btn.classList.remove('active', 'bg-white', 'text-black');
+             btn.classList.add('bg-transparent', 'text-white');
+           }
+           this.broadcastMuteState();
+         });
 
         document.getElementById('liveQualitySelector').addEventListener('change', async (e) => {
           const quality = e.target.value;
@@ -977,30 +1680,100 @@
 
         document.getElementById('toggleScreen').addEventListener('click', async () => {
           try {
-            const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
-            const screenTrack = screenStream.getVideoTracks()[0];
-            
-            const videoTrack = this.localStream.getVideoTracks()[0];
-            if (videoTrack) {
-              videoTrack.stop();
-              this.localStream.removeTrack(videoTrack);
+            if (this.isScreenSharing) {
+              // Stop screen sharing - revert to camera
+              this.isScreenSharing = false;
+              if (this.screenTrack) {
+                this.screenTrack.stop();
+                this.screenTrack = null;
+              }
+              
+              // Get new camera stream
+              const cameraStream = await navigator.mediaDevices.getUserMedia({
+                video: {
+                  width: { ideal: 1280 },
+                  height: { ideal: 720 },
+                  frameRate: { ideal: 30 }
+                }
+              });
+              const cameraTrack = cameraStream.getVideoTracks()[0];
+              
+              // Replace in local stream
+              const oldVideoTrack = this.localStream.getVideoTracks()[0];
+              if (oldVideoTrack) {
+                this.localStream.removeTrack(oldVideoTrack);
+                oldVideoTrack.stop();
+              }
+              this.localStream.addTrack(cameraTrack);
+              
+              // Replace in all peer connections via WebRTC module
+              if (this.webrtc && oldVideoTrack) {
+                await this.webrtc.replaceTrackForAllPeers(oldVideoTrack, cameraTrack);
+              }
+              
+              document.getElementById('localVideo').srcObject = this.localStream;
+              document.getElementById('toggleScreen').classList.remove('bg-white', 'text-black');
+              return;
             }
             
-            this.localStream.addTrack(screenTrack);
-            const localVideo = document.getElementById('localVideo');
-            localVideo.srcObject = this.localStream;
+            const screenStream = await navigator.mediaDevices.getDisplayMedia({
+              video: { cursor: 'always' },
+              audio: false
+            });
+            const screenTrack = screenStream.getVideoTracks()[0];
+            this.screenTrack = screenTrack;
+            this.isScreenSharing = true;
             
+            // Replace video track in local stream
+            const oldVideoTrack = this.localStream.getVideoTracks()[0];
+            if (oldVideoTrack) {
+              this.localStream.removeTrack(oldVideoTrack);
+              oldVideoTrack.stop();
+            }
+            this.localStream.addTrack(screenTrack);
+            
+            // Replace in all peer connections via WebRTC module
+            if (this.webrtc && oldVideoTrack) {
+              await this.webrtc.replaceTrackForAllPeers(oldVideoTrack, screenTrack);
+            }
+            
+            document.getElementById('localVideo').srcObject = this.localStream;
             document.getElementById('toggleScreen').classList.add('bg-white', 'text-black');
             
+            // Handle browser-native screen share stop
             screenTrack.onended = async () => {
-              const newStream = await navigator.mediaDevices.getUserMedia({ video: true });
-              const newVideoTrack = newStream.getVideoTracks()[0];
-              this.localStream.addTrack(newVideoTrack);
-              localVideo.srcObject = this.localStream;
+              this.isScreenSharing = false;
+              this.screenTrack = null;
+              
+              try {
+                const cameraStream = await navigator.mediaDevices.getUserMedia({
+                  video: {
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 },
+                    frameRate: { ideal: 30 }
+                  }
+                });
+                const cameraTrack = cameraStream.getVideoTracks()[0];
+                
+                const oldTrack = this.localStream.getVideoTracks()[0];
+                if (oldTrack) {
+                  this.localStream.removeTrack(oldTrack);
+                }
+                this.localStream.addTrack(cameraTrack);
+                
+                if (this.webrtc && oldTrack) {
+                  await this.webrtc.replaceTrackForAllPeers(oldTrack, cameraTrack);
+                }
+                
+                document.getElementById('localVideo').srcObject = this.localStream;
+              } catch (err) {
+                console.error('Failed to revert to camera:', err);
+              }
               document.getElementById('toggleScreen').classList.remove('bg-white', 'text-black');
             };
           } catch (error) {
             console.error('Screen share error:', error);
+            this.isScreenSharing = false;
           }
         });
 
@@ -1023,23 +1796,146 @@
           }
         });
 
+        document.getElementById('toggleChat').addEventListener('click', () => {
+          this.chatOpen = !this.chatOpen;
+          const panel = document.getElementById('chatPanel');
+          const badge = document.getElementById('chatBadge');
+          if (this.chatOpen) {
+            panel.classList.remove('translate-x-full');
+            if (badge) badge.classList.add('hidden');
+            const input = document.getElementById('chatInput');
+            if (input) input.focus();
+          } else {
+            panel.classList.add('translate-x-full');
+          }
+        });
+
+        document.getElementById('closeChat').addEventListener('click', () => {
+          this.chatOpen = false;
+          document.getElementById('chatPanel').classList.add('translate-x-full');
+        });
+
+        document.getElementById('clearChat').addEventListener('click', () => {
+          this.chatMessages = [];
+          this.renderChatMessages();
+          if (this.webrtc) {
+            this.webrtc.broadcastData({ type: 'chat-clear' });
+          }
+          this.addDebugMessage('CHAT_CLEARED');
+        });
+
+        const chatSend = () => {
+          const input = document.getElementById('chatInput');
+          if (input && input.value.trim()) {
+            this.sendChatMessage(input.value);
+            input.value = '';
+          }
+        };
+
+        document.getElementById('chatSend').addEventListener('click', chatSend);
+        document.getElementById('chatInput').addEventListener('keypress', (e) => {
+          if (e.key === 'Enter') chatSend();
+        });
+
+        document.getElementById('chatExpiry').addEventListener('change', (e) => {
+          this.chatExpiry = parseInt(e.target.value) || 0;
+        });
+
+        // Start connection quality polling
+        this._qualityInterval = setInterval(() => {
+          this.updateConnectionQualityDisplay();
+        }, 5000);
+
+        // Auto quality adjustment every 20 seconds
+        this._autoQualityInterval = setInterval(async () => {
+          if (this.webrtc && this.peers.size > 0) {
+            const result = await this.webrtc.autoAdjustQuality();
+            if (result?.changed) {
+              this.addDebugMessage(`AUTO_QUALITY: ${result.direction} → ${result.quality} (RTT:${result.rtt.toFixed(0)}ms, loss:${result.loss.toFixed(1)}%)`);
+              // Update selector UI
+              const sel = document.getElementById('liveQualitySelector');
+              if (sel) sel.value = result.quality;
+              this.mediaOptions.videoQuality = result.quality;
+            }
+          }
+        }, 20000);
+
         document.getElementById('leaveRoom').addEventListener('click', () => {
           this.leaveRoom();
         });
 
+        // Relay panel toggle
+        document.getElementById('toggleRelays').addEventListener('click', () => {
+          document.getElementById('relayPanel').classList.toggle('hidden');
+          this.renderRelayList();
+        });
+
+        // Relay list auto-refresh
+        this._relayRefreshInterval = setInterval(() => {
+          if (!document.getElementById('relayPanel').classList.contains('hidden')) {
+            this.renderRelayList();
+          }
+        }, 5000);
+
+        // Add custom relay
+        document.getElementById('addRelayBtn').addEventListener('click', async () => {
+          const input = document.getElementById('newRelayUrl');
+          const url = input.value.trim();
+          if (!url) return;
+          try {
+            if (this.signaling?.nostr) {
+              const ok = await this.signaling.nostr.addCustomRelay(url);
+              this.addDebugMessage(`RELAY_ADDED: ${url} (${ok ? 'connected' : 'failed'})`);
+              input.value = '';
+              this.renderRelayList();
+            }
+          } catch (err) {
+            this.addDebugMessage(`RELAY_ERROR: ${err.message}`);
+          }
+        });
+
+        // Screenshot/visibility protection
+        document.addEventListener('visibilitychange', () => {
+          const overlay = document.getElementById('screenshotOverlay');
+          if (document.hidden) {
+            overlay.style.display = 'flex';
+          } else {
+            overlay.style.display = 'none';
+          }
+        });
+
         document.addEventListener('keydown', (e) => {
-          if (e.key === 'd' || e.key === 'D') {
+          const tag = e.target.tagName;
+          const isInput = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target.isContentEditable;
+          if ((e.key === 'd' || e.key === 'D') && !isInput) {
             document.getElementById('debugPanel').classList.toggle('hidden');
+          }
+          if (e.key === 'Escape') {
+            this.chatOpen = false;
+            document.getElementById('chatPanel').classList.add('translate-x-full');
           }
         });
       },
 
       leaveRoom() {
-        if (this.webrtc) {
-          this.webrtc.destroy();
+        if (this._qualityInterval) {
+          clearInterval(this._qualityInterval);
+        }
+        if (this._autoQualityInterval) {
+          clearInterval(this._autoQualityInterval);
+        }
+        if (this._relayRefreshInterval) {
+          clearInterval(this._relayRefreshInterval);
         }
         if (this.signaling) {
+          this.signaling.broadcastLeave();
           this.signaling.destroy();
+        }
+        if (this.relayTree) {
+          this.relayTree.destroy();
+        }
+        if (this.webrtc) {
+          this.webrtc.destroy();
         }
         if (this.localStream) {
           this.localStream.getTracks().forEach(track => track.stop());

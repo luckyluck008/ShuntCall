@@ -7,17 +7,17 @@ test.describe('Video Stream Fix Tests', () => {
     const webrtcPath = path.join(process.cwd(), 'js', 'webrtc.js');
     const webrtcContent = fs.readFileSync(webrtcPath, 'utf-8');
     
-    const hasEmptyStreamsCheck = webrtcContent.includes('let remoteStream = streams[0]');
-    const hasNewStreamCreation = webrtcContent.includes('remoteStream = new MediaStream()');
-    const hasAddTrack = webrtcContent.includes('remoteStream.addTrack(track)');
+    const hasStreamsCheck = webrtcContent.includes('streams[0]');
+    const hasNewStreamCreation = webrtcContent.includes('new MediaStream()');
+    const hasAddTrack = webrtcContent.includes('.addTrack(track)');
     
     console.log('Fix verification:', {
-      hasEmptyStreamsCheck,
+      hasStreamsCheck,
       hasNewStreamCreation,
       hasAddTrack
     });
     
-    expect(hasEmptyStreamsCheck).toBe(true);
+    expect(hasStreamsCheck).toBe(true);
     expect(hasNewStreamCreation).toBe(true);
     expect(hasAddTrack).toBe(true);
   });

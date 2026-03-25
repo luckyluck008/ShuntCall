@@ -5,19 +5,31 @@
 
 const ICE_SERVERS = [
   { urls: 'stun:stun.l.google.com:19302' },
-  { urls: 'stun:stun.cloudflare.com:3478' }
+  { urls: 'stun:stun.cloudflare.com:3478' },
+  { urls: 'stun:stun1.l.google.com:19302' },
+  { urls: 'stun:stun2.l.google.com:19302' }
+];
+
+const PUBLIC_TURN_SERVERS = [
+  { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+  { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+  { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' }
 ];
 
 const ShuntCallWebRTC = {
   peerConnections: {},
+  dataChannels: {},
+  remoteStreams: {},
   localStream: null,
   peerId: null,
   signaling: null,
   pendingIceCandidates: {},
   config: {
     iceServers: ICE_SERVERS,
-    iceCandidatePoolSize: 10
+    iceCandidatePoolSize: 10,
+    iceTransportPolicy: 'all'
   },
+  turnEnabled: false,
   listeners: {},
   currentVideoQuality: '720p',
   videoQualityMap: {
@@ -34,6 +46,9 @@ const ShuntCallWebRTC = {
     this.peerId = peerId;
     this.signaling = signaling;
     this.pendingIceCandidates = {};
+    this.remoteStreams = {};
+    this.dataChannels = {};
+    this.turnEnabled = false;
     
     // Add local stream track event listeners for dynamic track management
     if (this.localStream) {
@@ -45,6 +60,18 @@ const ShuntCallWebRTC = {
     this.setupSignalingListeners();
     console.log('ShuntCallWebRTC initialized');
     return this;
+  },
+
+  enableTurn() {
+    this.turnEnabled = true;
+    this.config.iceServers = [...ICE_SERVERS, ...PUBLIC_TURN_SERVERS];
+    console.log('TURN servers enabled for NAT traversal');
+  },
+
+  disableTurn() {
+    this.turnEnabled = false;
+    this.config.iceServers = ICE_SERVERS;
+    console.log('TURN servers disabled');
   },
 
   setupLocalStreamTrackListeners(stream) {
@@ -101,6 +128,12 @@ const ShuntCallWebRTC = {
            return;
          }
          
+         // Glare resolution: only peer with higher pubkey creates offer
+         if (fromPeerId > this.peerId) {
+           console.log('Remote peer has higher ID, they will create offer. Waiting.');
+           return;
+         }
+         
          // Create a dedicated offer for this peer
          const offer = await this.createOffer(fromPeerId);
          console.log('Offer created successfully:', offer?.type);
@@ -136,12 +169,40 @@ const ShuntCallWebRTC = {
            console.log('Track added to peer connection:', track.kind, 'sender:', sender);
          });
        }
-     } else {
-       console.warn('No local stream available when creating peer connection');
-     }
+      } else {
+        console.warn('No local stream available when creating peer connection');
+      }
+
+    // Setup DataChannel for signaling state sync and chat
+    // The offerer creates the channel, the answerer receives it via ondatachannel
+    const dataChannel = pc.createDataChannel('shuntcall', {
+      ordered: true
+    });
+    this.setupDataChannel(dataChannel, remotePeerId);
+    this.dataChannels[remotePeerId] = dataChannel;
+
+    pc.ondatachannel = (event) => {
+      console.log('DataChannel received from:', remotePeerId.slice(0, 16));
+      const channel = event.channel;
+      this.setupDataChannel(channel, remotePeerId);
+      this.dataChannels[remotePeerId] = channel;
+    };
 
     pc.onicecandidate = (event) => {
       if (event.candidate) {
+        // IP Leak Detection: check for host candidates that expose local IPs
+        if (event.candidate.candidate && event.candidate.candidate.includes('typ host')) {
+          const ipMatch = event.candidate.candidate.match(/(\d+\.\d+\.\d+\.\d+)/);
+          if (ipMatch && !ipMatch[1].startsWith('127.')) {
+            this.emit('ipLeakWarning', {
+              peerId: remotePeerId,
+              ip: ipMatch[1],
+              type: 'host',
+              candidate: event.candidate.candidate
+            });
+          }
+        }
+        
         console.log('ICE candidate generated for peer:', remotePeerId.slice(0, 16));
         this.emit('iceCandidate', {
           peerId: remotePeerId,
@@ -158,6 +219,7 @@ const ShuntCallWebRTC = {
     pc.ontrack = (event) => {
       console.log('Track received from:', remotePeerId.slice(0, 16) + '...');
       const { track, streams } = event;
+      const isFirstTrack = !this.remoteStreams[remotePeerId];
       
       console.log('Track details:', {
         kind: track.kind,
@@ -166,15 +228,23 @@ const ShuntCallWebRTC = {
         readyState: track.readyState,
         enabled: track.enabled,
         streams: streams.length,
-        streamId: streams[0]?.id
+        streamId: streams[0]?.id,
+        isFirstTrack
       });
       
-      let remoteStream = streams[0];
-      if (!remoteStream) {
-        console.log('No streams in ontrack event - creating new stream for track');
-        remoteStream = new MediaStream();
-        remoteStream.addTrack(track);
+      // Maintain a single MediaStream per remote peer that accumulates all tracks
+      if (!this.remoteStreams[remotePeerId]) {
+        // Use incoming stream if available, otherwise create a new one
+        if (streams[0]) {
+          this.remoteStreams[remotePeerId] = streams[0];
+        } else {
+          this.remoteStreams[remotePeerId] = new MediaStream();
+        }
       }
+      
+      // Add track to our managed stream (idempotent - won't duplicate)
+      this.remoteStreams[remotePeerId].addTrack(track);
+      const remoteStream = this.remoteStreams[remotePeerId];
       
       // Add track error listener
       track.onended = () => {
@@ -196,10 +266,11 @@ const ShuntCallWebRTC = {
         });
       };
       
-      // Emit both remoteStream and track events for flexibility
+      // Always emit remoteStream so the UI can update with new tracks
       this.emit('remoteStream', {
         peerId: remotePeerId,
-        stream: remoteStream
+        stream: remoteStream,
+        isFirstTrack
       });
       
       this.emit('trackReceived', {
@@ -263,8 +334,7 @@ const ShuntCallWebRTC = {
       sdpSize: answer.sdp.length
     });
 
-    const optimizedAnswer = this.optimizeSDP(answer);
-    await pc.setLocalDescription(optimizedAnswer);
+    await pc.setLocalDescription(answer);
 
     await this.waitForIceGathering(pc);
 
@@ -293,6 +363,15 @@ const ShuntCallWebRTC = {
       console.log('No peer connection for ICE candidate - buffering:', peerId.slice(0, 16));
       this.pendingIceCandidates[peerId] = this.pendingIceCandidates[peerId] || [];
       this.pendingIceCandidates[peerId].push(candidate);
+      
+      // Auto-cleanup orphaned pending candidates after 60s
+      if (!this.pendingIceCleanupTimers) this.pendingIceCleanupTimers = {};
+      if (!this.pendingIceCleanupTimers[peerId]) {
+        this.pendingIceCleanupTimers[peerId] = setTimeout(() => {
+          delete this.pendingIceCandidates[peerId];
+          delete this.pendingIceCleanupTimers[peerId];
+        }, 60000);
+      }
       return;
     }
 
@@ -301,6 +380,7 @@ const ShuntCallWebRTC = {
         await pc.addIceCandidate(new RTCIceCandidate(candidate));
       } else {
         console.log('Remote description not set - buffering ICE candidate:', peerId.slice(0, 16));
+        this.pendingIceCandidates[peerId] = this.pendingIceCandidates[peerId] || [];
         this.pendingIceCandidates[peerId].push(candidate);
       }
     } catch (error) {
@@ -332,21 +412,17 @@ const ShuntCallWebRTC = {
         return;
       }
 
-      const checkState = () => {
+      // Use icegatheringstatechange instead of overwriting onicecandidate
+      const onGatheringChange = () => {
         if (pc.iceGatheringState === 'complete') {
-          pc.onicecandidate = null;
+          pc.removeEventListener('icegatheringstatechange', onGatheringChange);
           resolve();
         }
       };
-
-      pc.onicecandidate = (event) => {
-        if (!event.candidate) {
-          checkState();
-        }
-      };
+      pc.addEventListener('icegatheringstatechange', onGatheringChange);
 
       setTimeout(() => {
-        pc.onicecandidate = null;
+        pc.removeEventListener('icegatheringstatechange', onGatheringChange);
         resolve();
       }, 2000);
     });
@@ -372,10 +448,8 @@ const ShuntCallWebRTC = {
       hasAudio: offer.sdp.includes('m=audio')
     });
 
-    // Optimize SDP for better compatibility
-    const optimizedOffer = this.optimizeSDP(offer);
-    
-    await pc.setLocalDescription(optimizedOffer);
+    // Set local description directly (no SDP manipulation needed)
+    await pc.setLocalDescription(offer);
     
     await this.waitForIceGathering(pc);
     
@@ -385,10 +459,6 @@ const ShuntCallWebRTC = {
     return pc.localDescription;
   },
 
-  // Remove SDP optimization to prevent m-line order mismatch
-  optimizeSDP(sessionDescription) {
-    return sessionDescription;
-  },
 
 
 
@@ -423,6 +493,11 @@ const ShuntCallWebRTC = {
   async attemptReconnect(pc) {
     if (pc.reconnectAttempts >= pc.maxReconnectAttempts) {
       console.log(`Max reconnect attempts reached for ${pc.peerId?.slice(0, 16)}`);
+      // Enable TURN as last resort before giving up
+      if (!this.turnEnabled) {
+        this.enableTurn();
+        console.log('Enabling TURN servers for future connections');
+      }
       this.emit('peerDisconnected', { peerId: pc.peerId });
       return;
     }
@@ -430,8 +505,22 @@ const ShuntCallWebRTC = {
     pc.reconnectAttempts++;
     console.log(`Attempting reconnect ${pc.reconnectAttempts}/${pc.maxReconnectAttempts} for ${pc.peerId?.slice(0, 16)}`);
     
+    // Enable TURN on second reconnect attempt
+    if (pc.reconnectAttempts >= 2 && !this.turnEnabled) {
+      this.enableTurn();
+      console.log('TURN enabled for reconnection (likely symmetric NAT)');
+    }
+    
     try {
       pc.restartIce();
+      
+      // Timeout: if connection not restored within 30s, try again or give up
+      setTimeout(() => {
+        if (pc.connectionState !== 'connected' && pc.iceConnectionState !== 'connected' && pc.iceConnectionState !== 'completed') {
+          console.log(`ICE restart timeout for ${pc.peerId?.slice(0, 16)}, retrying...`);
+          this.attemptReconnect(pc);
+        }
+      }, 30000);
     } catch (error) {
       console.error('ICE restart failed:', error);
     }
@@ -447,32 +536,26 @@ const ShuntCallWebRTC = {
       error
     });
     
-    // Try to recover the track
     try {
       const pc = this.peerConnections[peerId];
       if (pc && pc.connectionState === 'connected') {
-        // Check if track is still available locally
         const localTracks = this.getLocalTracks();
         const sameKindTrack = localTracks.find(t => t.kind === track.kind && t.readyState === 'live');
         
         if (sameKindTrack) {
           console.log('Trying to recover track by replacing with same kind track');
-          const receiver = pc.getReceivers().find(r => r.track === track);
-          if (receiver) {
-            // For outgoing tracks, we need to find the sender
-            const sender = pc.getSenders().find(s => s.track?.kind === track.kind);
-            if (sender) {
-              await sender.replaceTrack(sameKindTrack);
-              console.log('Track recovered successfully');
-              this.emit('trackRecovered', {
-                peerId,
-                track: sameKindTrack,
-                kind: sameKindTrack.kind
-              });
-            }
+          // Find the sender for outgoing tracks (not receiver)
+          const sender = pc.getSenders().find(s => s.track === track || s.track?.kind === track.kind);
+          if (sender) {
+            await sender.replaceTrack(sameKindTrack);
+            console.log('Track recovered successfully via sender.replaceTrack');
+            this.emit('trackRecovered', {
+              peerId,
+              track: sameKindTrack,
+              kind: sameKindTrack.kind
+            });
           } else {
-            // Try to add the track again if it's missing
-            console.log('Track not found - trying to add again');
+            console.log('No sender found - adding track as new');
             pc.addTrack(sameKindTrack, this.localStream);
           }
         }
@@ -556,9 +639,19 @@ const ShuntCallWebRTC = {
   closePeerConnection(peerId) {
     const pc = this.peerConnections[peerId];
     if (pc) {
+      const dc = this.dataChannels[peerId];
+      if (dc && dc.readyState !== 'closed') {
+        dc.close();
+      }
       pc.close();
       delete this.peerConnections[peerId];
       delete this.pendingIceCandidates[peerId];
+      delete this.remoteStreams[peerId];
+      delete this.dataChannels[peerId];
+      if (this.pendingIceCleanupTimers?.[peerId]) {
+        clearTimeout(this.pendingIceCleanupTimers[peerId]);
+        delete this.pendingIceCleanupTimers[peerId];
+      }
     }
   },
 
@@ -566,6 +659,8 @@ const ShuntCallWebRTC = {
     Object.keys(this.peerConnections).forEach(peerId => {
       this.closePeerConnection(peerId);
     });
+    this.remoteStreams = {};
+    this.dataChannels = {};
   },
 
   addLocalStream(stream) {
@@ -634,6 +729,27 @@ const ShuntCallWebRTC = {
     return this.localStream.getTracks();
   },
 
+  async replaceTrackForAllPeers(oldTrack, newTrack) {
+    let success = false;
+    for (const [peerId, pc] of Object.entries(this.peerConnections)) {
+      try {
+        const sender = pc.getSenders().find(s => s.track === oldTrack || s.track?.kind === newTrack.kind);
+        if (sender) {
+          await sender.replaceTrack(newTrack);
+          console.log('Track replaced for peer:', peerId.slice(0, 16));
+          success = true;
+        } else {
+          pc.addTrack(newTrack, this.localStream);
+          console.log('Track added for peer:', peerId.slice(0, 16));
+          success = true;
+        }
+      } catch (error) {
+        console.error('Failed to replace track for peer:', peerId.slice(0, 16), error);
+      }
+    }
+    return success;
+  },
+
   async replaceTrack(peerId, oldTrack, newTrack) {
     const pc = this.peerConnections[peerId];
     if (!pc) {
@@ -671,6 +787,57 @@ const ShuntCallWebRTC = {
       });
       return false;
     }
+  },
+
+  setupDataChannel(channel, peerId) {
+    // Guard against double-setup
+    if (channel._setupComplete) return;
+    channel._setupComplete = true;
+    
+    channel.onopen = () => {
+      console.log('DataChannel open with:', peerId.slice(0, 16));
+      this.emit('dataChannelOpen', { peerId, channel });
+    };
+
+    channel.onclose = () => {
+      console.log('DataChannel closed with:', peerId.slice(0, 16));
+      this.emit('dataChannelClose', { peerId });
+    };
+
+    channel.onerror = (error) => {
+      console.error('DataChannel error with:', peerId.slice(0, 16), error);
+    };
+
+    channel.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        this.emit('dataChannelMessage', { peerId, data, channel });
+      } catch (e) {
+        console.warn('Failed to parse DataChannel message:', e);
+      }
+    };
+  },
+
+  sendData(peerId, data) {
+    const channel = this.dataChannels[peerId];
+    if (channel && channel.readyState === 'open') {
+      channel.send(JSON.stringify(data));
+      return true;
+    }
+    return false;
+  },
+
+  broadcastData(data) {
+    let sent = 0;
+    Object.keys(this.dataChannels).forEach(peerId => {
+      if (this.sendData(peerId, data)) sent++;
+    });
+    return sent;
+  },
+
+  getDataChannelState(peerId) {
+    const channel = this.dataChannels[peerId];
+    return channel ? channel.readyState : null;
   },
 
   on(event, callback) {
@@ -774,13 +941,70 @@ const ShuntCallWebRTC = {
     return this.currentVideoQuality;
   },
 
+  async autoAdjustQuality() {
+    if (!this.localStream || Object.keys(this.peerConnections).length === 0) return;
+    
+    let worstRtt = 0;
+    let totalPacketLoss = 0;
+    let reportCount = 0;
+    
+    for (const pc of Object.values(this.peerConnections)) {
+      try {
+        const stats = await pc.getStats();
+        stats.forEach(report => {
+          if (report.type === 'candidate-pair' && report.state === 'succeeded') {
+            worstRtt = Math.max(worstRtt, report.currentRoundTripTime || 0);
+          }
+          if (report.type === 'inbound-rtp' && report.kind === 'video') {
+            const lost = report.packetsLost || 0;
+            const received = report.packetsReceived || 1;
+            totalPacketLoss += (lost / (lost + received)) * 100;
+            reportCount++;
+          }
+        });
+      } catch (e) { /* ignore */ }
+    }
+    
+    const avgPacketLoss = reportCount > 0 ? totalPacketLoss / reportCount : 0;
+    const rttMs = worstRtt * 1000;
+    
+    const qualityOrder = ['8k', '4k', '1440p', '1080p', '720p', '480p'];
+    const currentIdx = qualityOrder.indexOf(this.currentVideoQuality);
+    
+    // Downgrade if RTT > 500ms or packet loss > 10%
+    if ((rttMs > 500 || avgPacketLoss > 10) && currentIdx < qualityOrder.length - 1) {
+      const newQuality = qualityOrder[currentIdx + 1];
+      console.log(`Auto-adjusting quality DOWN: ${this.currentVideoQuality} -> ${newQuality} (RTT:${rttMs.toFixed(0)}ms, loss:${avgPacketLoss.toFixed(1)}%)`);
+      await this.setVideoQuality(newQuality, false);
+      return { changed: true, direction: 'down', quality: newQuality, rtt: rttMs, loss: avgPacketLoss };
+    }
+    
+    // Upgrade if RTT < 100ms and packet loss < 2% and stable for a while
+    if ((rttMs < 100 && avgPacketLoss < 2) && currentIdx > 0) {
+      const newQuality = qualityOrder[currentIdx - 1];
+      console.log(`Auto-adjusting quality UP: ${this.currentVideoQuality} -> ${newQuality} (RTT:${rttMs.toFixed(0)}ms, loss:${avgPacketLoss.toFixed(1)}%)`);
+      await this.setVideoQuality(newQuality, false);
+      return { changed: true, direction: 'up', quality: newQuality, rtt: rttMs, loss: avgPacketLoss };
+    }
+    
+    return { changed: false, quality: this.currentVideoQuality, rtt: rttMs, loss: avgPacketLoss };
+  },
+
   getQualitySettings(quality) {
     return this.videoQualityMap[quality] || null;
   },
 
   destroy() {
+    // Remove signaling listeners
+    if (this.signaling) {
+      this.signaling.off('presence');
+      this.signaling.off('offer');
+      this.signaling.off('answer');
+      this.signaling.off('iceCandidate');
+    }
     this.closeAllConnections();
     this.listeners = {};
+    this.signaling = null;
   }
 };
 
@@ -789,4 +1013,3 @@ if (typeof window !== 'undefined') {
 }
 
 export { ShuntCallWebRTC };
-console.log('ShuntCallWebRTC module loaded');

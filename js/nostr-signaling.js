@@ -1,16 +1,22 @@
 /**
  * Nostr Signaling Module
- * WebRTC signaling via Nostr events
+ * WebRTC signaling via Nostr events with heartbeat and signature verification
  */
 
 const EVENT_KIND = 33333;
+const HEARTBEAT_INTERVAL = 15000;
+const PEER_TIMEOUT = 45000;
 
 const NostrSignaling = {
   roomTag: null,
   nostr: null,
   listeners: {},
-  sentEvents: new Set(),
+  sentEvents: new Map(),
+  sentEventsMax: 1000,
   pendingOffers: new Map(),
+  knownPeers: {},
+  heartbeatInterval: null,
+  peerTimeoutInterval: null,
 
   async init(roomId, password) {
     console.log('NostrSignaling: Initializing with roomId:', roomId);
@@ -22,6 +28,8 @@ const NostrSignaling = {
       await this.nostr.init();
       
       this.setupSubscriptions();
+      this.startHeartbeat();
+      this.startPeerTimeoutCheck();
       
       console.log('NostrSignaling: Ready');
       return this;
@@ -42,7 +50,6 @@ const NostrSignaling = {
 
    setupSubscriptions() {
      try {
-       // Get events from the last 60 seconds to catch offers published before we subscribed
        const since = Math.floor(Date.now() / 1000) - 60;
        
        const filters = [
@@ -53,12 +60,10 @@ const NostrSignaling = {
          }
        ];
 
-       // Use shorter subscription ID (first 16 chars of room tag) to avoid relay limits
        const shortRoomTag = this.roomTag.slice(0, 16);
        console.log('NostrSignaling: Subscribing with filters', JSON.stringify(filters));
        
        this.nostr.subscribe('room-' + shortRoomTag, filters, (event) => {
-         console.log('NostrSignaling: Received event from', event.pubkey?.slice(0, 16), 'content type:', event.content ? JSON.parse(event.content).type : 'none');
          this.handleIncomingEvent(event);
        }, () => {
          console.log('NostrSignaling: EOSE received');
@@ -66,6 +71,53 @@ const NostrSignaling = {
     } catch (error) {
       console.error('NostrSignaling: Subscription setup error', error);
       throw error;
+    }
+  },
+
+  /**
+   * Verify a Nostr event signature
+   * @param {object} event - Nostr event object
+   * @returns {boolean} - True if signature is valid
+   */
+  verifyEventSignature(event) {
+    try {
+      if (!event || !event.id || !event.sig || !event.pubkey) {
+        console.warn('NostrSignaling: Event missing required fields for verification');
+        return false;
+      }
+      
+      // Recompute the event hash and compare
+      const eventData = [
+        0,
+        event.pubkey,
+        event.created_at,
+        event.kind,
+        event.tags,
+        event.content
+      ];
+      
+      if (window.NostrTools && window.NostrTools.verifyEvent) {
+        return window.NostrTools.verifyEvent(event);
+      }
+      
+      // Fallback: verify hash consistency
+      if (window.NostrTools && window.NostrTools.getEventHash) {
+        const computedId = window.NostrTools.getEventHash({
+          pubkey: event.pubkey,
+          created_at: event.created_at,
+          kind: event.kind,
+          tags: event.tags,
+          content: event.content
+        });
+        return computedId === event.id;
+      }
+      
+      // If no verification tools available, REJECT for security
+      console.error('NostrSignaling: No verification tools available, REJECTING event');
+      return false;
+    } catch (error) {
+      console.error('NostrSignaling: Signature verification error', error);
+      return false;
     }
   },
 
@@ -77,56 +129,169 @@ const NostrSignaling = {
       }
       
       if (event.pubkey === this.nostr.keys.publicKey) {
-        console.log('NostrSignaling: Ignoring own event');
+        return;
+      }
+      
+      // Verify event signature
+      if (!this.verifyEventSignature(event)) {
+        console.warn('NostrSignaling: Event signature verification FAILED from', event.pubkey?.slice(0, 16));
         return;
       }
       
       const eventId = event.id;
       if (this.sentEvents.has(eventId)) {
-        console.log('NostrSignaling: Ignoring already processed event');
         return;
       }
       
-      this.sentEvents.add(eventId);
+      // LRU: evict oldest if at capacity
+      if (this.sentEvents.size >= this.sentEventsMax) {
+        const oldestKey = this.sentEvents.keys().next().value;
+        this.sentEvents.delete(oldestKey);
+      }
+      this.sentEvents.set(eventId, Date.now());
 
        const data = JSON.parse(event.content);
 
+       // Update peer last-seen timestamp for all valid events
+       this.updatePeerSeen(event.pubkey);
+
          if (data.type === 'presence') {
-         console.log('=== NostrSignaling handleIncomingEvent ===');
-         console.log('Presence received from:', event.pubkey.slice(0, 16) + '...');
-         console.log('Emitting presence event...');
-         console.log('Listeners for presence:', this.listeners['presence']?.length || 0);
          this.emit('presence', {
            from: event.pubkey,
            eventId: eventId
          });
-         console.log('Presence event emitted successfully');
+      } else if (data.type === 'heartbeat') {
+        // Heartbeat received - peer is alive, already updated via updatePeerSeen
       } else if (data.type === 'offer' && data.sdp) {
-        console.log('NostrSignaling: Received offer from', event.pubkey.slice(0, 16) + '...');
         this.emit('offer', {
           from: event.pubkey,
           sdp: data.sdp,
           eventId: eventId
         });
       } else if (data.type === 'answer' && data.sdp) {
-        console.log('NostrSignaling: Received answer from', event.pubkey.slice(0, 16) + '...');
         this.emit('answer', {
           from: event.pubkey,
           sdp: data.sdp,
           eventId: eventId
         });
       } else if (data.type === 'ice' && data.candidate) {
-        console.log('NostrSignaling: Received ICE candidate from', event.pubkey.slice(0, 16) + '...');
         this.emit('iceCandidate', {
           from: event.pubkey,
           candidate: data.candidate,
           eventId: eventId
+        });
+      } else if (data.type === 'leave') {
+        this.emit('peerLeft', {
+          from: event.pubkey
+        });
+        delete this.knownPeers[event.pubkey];
+      } else if (data.type === 'nickname') {
+        this.emit('nickname', {
+          from: event.pubkey,
+          nickname: data.nickname
         });
       } else {
         console.log('NostrSignaling: Unknown event type', data.type);
       }
     } catch (e) {
       console.warn('NostrSignaling: Failed to parse event content', e);
+    }
+  },
+
+  /**
+   * Update the last-seen timestamp for a peer
+   */
+  updatePeerSeen(pubkey) {
+    const wasKnown = !!this.knownPeers[pubkey];
+    this.knownPeers[pubkey] = { lastSeen: Date.now() };
+    if (!wasKnown) {
+      this.emit('peerDiscovered', { pubkey });
+    }
+  },
+
+  /**
+   * Start sending periodic heartbeats
+   */
+  startHeartbeat() {
+    this.heartbeatInterval = setInterval(async () => {
+      await this.sendHeartbeat();
+    }, HEARTBEAT_INTERVAL);
+  },
+
+  /**
+   * Send a heartbeat event
+   */
+  async sendHeartbeat() {
+    try {
+      const payload = {
+        type: 'heartbeat',
+        from: this.nostr.keys.publicKey,
+        timestamp: Date.now()
+      };
+
+      const tags = [
+        ['t', this.roomTag]
+      ];
+
+      await this.nostr.publish(EVENT_KIND, tags, JSON.stringify(payload));
+    } catch (error) {
+      console.error('NostrSignaling: Heartbeat error', error);
+    }
+  },
+
+  /**
+   * Start checking for timed-out peers
+   */
+  startPeerTimeoutCheck() {
+    this.peerTimeoutInterval = setInterval(() => {
+      this.checkPeerTimeouts();
+    }, HEARTBEAT_INTERVAL);
+  },
+
+  /**
+   * Check for peers that haven't sent heartbeat within timeout
+   */
+  checkPeerTimeouts() {
+    const now = Date.now();
+    Object.entries(this.knownPeers).forEach(([pubkey, data]) => {
+      if (now - data.lastSeen > PEER_TIMEOUT) {
+        console.log('NostrSignaling: Peer timed out:', pubkey.slice(0, 16));
+        delete this.knownPeers[pubkey];
+        this.emit('peerTimedOut', { pubkey });
+      }
+    });
+  },
+
+  /**
+   * Broadcast leave message when disconnecting
+   */
+  async broadcastLeave() {
+    try {
+      const payload = {
+        type: 'leave',
+        from: this.nostr.keys.publicKey
+      };
+      const tags = [['t', this.roomTag]];
+      await this.nostr.publish(EVENT_KIND, tags, JSON.stringify(payload));
+    } catch (error) {
+      console.error('NostrSignaling: Leave broadcast error', error);
+    }
+  },
+
+  /**
+   * Set and broadcast a nickname
+   */
+  async setNickname(nickname) {
+    try {
+      const payload = {
+        type: 'nickname',
+        nickname: nickname.slice(0, 32),
+        from: this.nostr.keys.publicKey
+      };
+      const tags = [['t', this.roomTag]];
+      await this.nostr.publish(EVENT_KIND, tags, JSON.stringify(payload));
+    } catch (error) {
+      console.error('NostrSignaling: Nickname broadcast error', error);
     }
   },
 
@@ -218,6 +383,13 @@ const NostrSignaling = {
     }
   },
 
+  /**
+   * Get list of known active peers
+   */
+  getKnownPeers() {
+    return { ...this.knownPeers };
+  },
+
   on(event, callback) {
     if (!this.listeners[event]) {
       this.listeners[event] = [];
@@ -239,17 +411,26 @@ const NostrSignaling = {
     return {
       roomTag: this.roomTag,
       pubkey: this.nostr?.keys?.publicKey,
-      nostrStatus: this.nostr?.getStatus()
+      nostrStatus: this.nostr?.getStatus(),
+      knownPeers: Object.keys(this.knownPeers).length
     };
   },
 
   destroy() {
+    if (this.heartbeatInterval) clearInterval(this.heartbeatInterval);
+    if (this.peerTimeoutInterval) clearInterval(this.peerTimeoutInterval);
+    if (this.nostr) {
+      const shortRoomTag = this.roomTag?.slice(0, 16);
+      if (shortRoomTag) {
+        this.nostr.unsubscribe('room-' + shortRoomTag);
+      }
+    }
     this.nostr = null;
     this.listeners = {};
+    this.knownPeers = {};
   }
 };
 
 if (typeof window !== 'undefined') window.NostrSignaling = NostrSignaling;
 
 export { NostrSignaling };
-console.log('NostrSignaling module loaded');

@@ -147,18 +147,19 @@ const ShuntCallFakePeer = {
    * Connect to signaling
    */
   async connectToSignaling() {
-    this.signaling = await ShuntCallSignaling.init(this.namespace, this.peerId);
+    this.signaling = NostrSignaling;
+    await this.signaling.init(this.roomId, 'fake-peer');
     
     this.signaling.on('offer', async (data) => {
-      await this.handleOffer(data.from, JSON.parse(data.sdp));
+      await this.handleOffer(data.from, { type: 'offer', sdp: data.sdp });
     });
     
     this.signaling.on('answer', async (data) => {
-      await this.handleAnswer(data.from, JSON.parse(data.sdp));
+      await this.handleAnswer(data.from, { type: 'answer', sdp: data.sdp });
     });
     
-    this.signaling.on('ice', async (data) => {
-      await this.handleIceCandidate(data.from, JSON.parse(data.candidate));
+    this.signaling.on('iceCandidate', async (data) => {
+      await this.handleIceCandidate(data.from, data.candidate);
     });
   },
 
@@ -279,4 +280,3 @@ if (typeof window !== 'undefined') {
 }
 
 export { ShuntCallFakePeer };
-console.log('ShuntCallFakePeer module loaded');
