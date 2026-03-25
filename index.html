@@ -364,12 +364,12 @@
         document.getElementById('displayPassword').value = password;
         document.getElementById('shareSection').classList.remove('hidden');
         
-        // Show "Enter Room" button instead of auto-redirect
+        // Show "Enter Room" button — password in fragment (never sent to server)
         const enterBtn = document.createElement('button');
         enterBtn.className = 'btn-solid w-full py-4 text-sm font-semibold uppercase tracking-wider rounded-sm mt-6';
         enterBtn.textContent = 'Enter Protocol Room';
         enterBtn.onclick = () => {
-          window.location.href = shareLink;
+          window.location.href = shareLink + '#' + encodeURIComponent(password);
         };
         document.getElementById('shareSection').appendChild(enterBtn);
 

@@ -18,18 +18,38 @@ async function setupRoom(page, roomId, password) {
   await page.fill('#roomPassword', password);
   await page.click('#submitPassword');
   
-  // Wait for media permission modal
-  await page.waitForTimeout(1500);
+  // Wait for device picker modal
+  await page.waitForTimeout(2000);
   
-  // Click authorize if present
-  const authorizeBtn = await page.$('#mediaPermissionAccept');
-  if (authorizeBtn) {
-    await authorizeBtn.click({ force: true });
+  // Click Join (device picker) if present
+  const joinBtn = await page.$('#mediaPermissionAccept');
+  if (joinBtn) {
+    await joinBtn.click({ force: true });
   }
   
-  // Wait for initialization
+  // Wait for room initialization
   await page.waitForTimeout(8000);
   
+  return logs;
+}
+
+// Helper: setup room with auto-password (via URL fragment)
+async function setupRoomAuto(page, roomId, password) {
+  const logs = [];
+  page.on('console', msg => logs.push(msg.text()));
+  
+  await page.goto('/room.html?room=' + encodeURIComponent(roomId) + '#' + encodeURIComponent(password));
+  
+  // Wait for device picker modal (auto-skip password)
+  await page.waitForTimeout(2000);
+  
+  // Click Join if device picker appeared
+  const joinBtn = await page.$('#mediaPermissionAccept');
+  if (joinBtn) {
+    await joinBtn.click({ force: true });
+  }
+  
+  await page.waitForTimeout(8000);
   return logs;
 }
 
@@ -616,5 +636,72 @@ test.describe('File Sharing Fix', () => {
     const logs = await setupRoom(page, ROOM_ID + '-file', PASSWORD);
     const btn = await page.$('#shareFile');
     expect(btn).not.toBeNull();
+  });
+});
+
+test.describe('Auto-Password via URL Fragment', () => {
+
+  test('room auto-initializes with password in URL fragment', async ({ page }) => {
+    const logs = await setupRoomAuto(page, ROOM_ID + '-autopw', PASSWORD);
+    // Password modal should NOT appear
+    const hasNostr = logs.some(l => l.includes('Nostr: Initializing'));
+    expect(hasNostr).toBe(true);
+  });
+
+  test('fragment is cleared from URL after init', async ({ page }) => {
+    await setupRoomAuto(page, ROOM_ID + '-frag', PASSWORD);
+    const url = page.url();
+    expect(url).not.toContain('#');
+  });
+
+  test('index.html enter button includes fragment', async ({ page, request }) => {
+    const resp = await request.get('/index.html');
+    const code = await resp.text();
+    // The enter button onclick should include # + password
+    expect(code).toContain("'#' + encodeURIComponent(password)");
+  });
+});
+
+test.describe('Zoom-Style Device Picker', () => {
+
+  test('device picker has camera selector', async ({ page, request }) => {
+    const resp = await request.get('/room.html');
+    const code = await resp.text();
+    expect(code).toContain('cameraSelect');
+    expect(code).toContain('enumerateDevices');
+  });
+
+  test('device picker has microphone selector', async ({ page, request }) => {
+    const resp = await request.get('/room.html');
+    const code = await resp.text();
+    expect(code).toContain('micSelect');
+    expect(code).toContain('micLevel');
+  });
+
+  test('device picker has camera preview', async ({ page, request }) => {
+    const resp = await request.get('/room.html');
+    const code = await resp.text();
+    expect(code).toContain('devicePreview');
+  });
+
+  test('device picker has Join button', async ({ page, request }) => {
+    const resp = await request.get('/room.html');
+    const code = await resp.text();
+    // The modal should have "Join" button text
+    expect(code).toContain('Join');
+  });
+
+  test('initMedia uses selected device IDs', async ({ page, request }) => {
+    const resp = await request.get('/room.html');
+    const code = await resp.text();
+    expect(code).toContain('videoDeviceId');
+    expect(code).toContain('audioDeviceId');
+    expect(code).toContain('deviceId: { exact:');
+  });
+
+  test('room initializes via device picker', async ({ page }) => {
+    const logs = await setupRoom(page, ROOM_ID + '-devpick', PASSWORD);
+    const hasRoom = logs.some(l => l.includes('Signaling initialized'));
+    expect(hasRoom).toBe(true);
   });
 });
