@@ -391,14 +391,6 @@ const Nostr = {
     };
   },
 
-  getHealthyRelays() {
-    return Object.keys(this.relays).filter(url => this.relays[url]?.readyState === 1);
-  },
-
-  getWritableRelays() {
-    return [...this.writableRelays];
-  },
-
   async addCustomRelay(url) {
     if (!url || !url.startsWith('wss://')) {
       throw new Error('Invalid relay URL. Must start with wss://');

@@ -363,7 +363,7 @@
   </script>
 
   <script>
-    // Security check for getUserMedia
+    // Security check for getUserMedia (runs before modules load)
     (function() {
       const isSecure = window.location.protocol === 'https:' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
       if (!isSecure) {
@@ -457,27 +457,13 @@
 
         // Password strength meter for room password
         input.addEventListener('input', (e) => {
-          const pw = e.target.value;
-          let score = 0;
-          if (pw.length >= 8) score++;
-          if (pw.length >= 12) score++;
-          if (pw.length >= 16) score++;
-          if (/[a-z]/.test(pw) && /[A-Z]/.test(pw)) score++;
-          if (/\d/.test(pw)) score++;
-          if (/[^a-zA-Z0-9]/.test(pw)) score++;
-          const charsetSize = (/[a-z]/.test(pw) ? 26 : 0) + (/[A-Z]/.test(pw) ? 26 : 0) + (/\d/.test(pw) ? 10 : 0) + (/[^a-zA-Z0-9]/.test(pw) ? 32 : 0);
-          const entropy = pw.length * Math.log2(charsetSize || 1);
-          if (entropy >= 60) score++;
-          if (entropy >= 80) score++;
-          const labels = ['Very Weak', 'Weak', 'Fair', 'Good', 'Strong', 'Very Strong'];
-          const colors = ['#ef4444', '#f97316', '#eab308', '#84cc16', '#22c55e', '#10b981'];
-          const idx = Math.min(Math.floor(score / 1.5), labels.length - 1);
+          const result = ShuntCallCrypto.calculatePasswordStrength(e.target.value);
           const bar = document.getElementById('roomPwStrengthBar');
           const text = document.getElementById('roomPwStrengthText');
-          bar.style.width = `${(score / 9) * 100}%`;
-          bar.style.background = colors[idx];
-          text.textContent = pw ? `${labels[idx]} (${Math.round(entropy)} bits)` : '';
-          text.style.color = colors[idx];
+          bar.style.width = `${(result.score / 9) * 100}%`;
+          bar.style.background = result.color;
+          text.textContent = e.target.value ? `${result.label} (${result.entropy} bits)` : '';
+          text.style.color = result.color;
         });
       },
 
@@ -487,7 +473,7 @@
 
          try {
            // Compute room tag
-           this.roomTag = await this.computeRoomTag(this.roomId, this.password);
+           this.roomTag = await ShuntCallCrypto.deriveNamespace(this.roomId, this.password);
            console.log('Room tag:', this.roomTag);
 
            // Initialize media with retry logic
@@ -729,11 +715,7 @@
          }
        },
 
-       async computeRoomTag(roomId, password) {
-        return ShuntCallCrypto.deriveNamespace(roomId, password);
-      },
-
-      async deriveEncryptionKey() {
+       async deriveEncryptionKey() {
         try {
           const keyMaterial = await crypto.subtle.importKey(
             'raw',
@@ -857,7 +839,7 @@
        },
 
         async initMedia() {
-          const isSecure = window.location.protocol === 'https:' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+           const isSecure = ShuntCallCrypto.isSecureContext();
           
           if (!isSecure) {
             throw new Error('System requires HTTPS or localhost for media access.');

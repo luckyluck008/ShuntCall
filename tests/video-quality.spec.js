@@ -59,17 +59,14 @@ test.describe('Video Quality Tests', () => {
     
     const hasGetAvailableQualities = webrtcContent.includes('getAvailableQualities');
     const hasGetCurrentQuality = webrtcContent.includes('getCurrentQuality');
-    const hasGetQualitySettings = webrtcContent.includes('getQualitySettings');
     
     console.log('Quality getter functions verification:', {
       hasGetAvailableQualities,
-      hasGetCurrentQuality,
-      hasGetQualitySettings
+      hasGetCurrentQuality
     });
     
     expect(hasGetAvailableQualities).toBe(true);
     expect(hasGetCurrentQuality).toBe(true);
-    expect(hasGetQualitySettings).toBe(true);
   });
 
   test('setVideoQuality function has correct fallback logic', async () => {
@@ -99,7 +96,6 @@ test.describe('Video Quality Tests', () => {
     const hasSetVideoQuality = webrtcContent.includes('setVideoQuality(');
     const hasGetAvailableQualities = webrtcContent.includes('getAvailableQualities()');
     const hasGetCurrentQuality = webrtcContent.includes('getCurrentQuality()');
-    const hasGetQualitySettings = webrtcContent.includes('getQualitySettings(');
     const hasVideoQualityMap = webrtcContent.includes('videoQualityMap');
     
     console.log('setVideoQuality methods verification:', {
@@ -107,7 +103,6 @@ test.describe('Video Quality Tests', () => {
       hasSetVideoQuality,
       hasGetAvailableQualities,
       hasGetCurrentQuality,
-      hasGetQualitySettings,
       hasVideoQualityMap
     });
     
@@ -115,7 +110,6 @@ test.describe('Video Quality Tests', () => {
     expect(hasSetVideoQuality).toBe(true);
     expect(hasGetAvailableQualities).toBe(true);
     expect(hasGetCurrentQuality).toBe(true);
-    expect(hasGetQualitySettings).toBe(true);
     expect(hasVideoQualityMap).toBe(true);
   });
 

@@ -220,9 +220,7 @@ test.describe('Media Transmission Tests', () => {
       return [
         'addLocalTrack',
         'removeLocalTrack',
-        'getRemoteTracks',
-        'getLocalTracks',
-        'replaceTrack'
+        'getLocalTracks'
       ].every(method => typeof window.ShuntCallWebRTC[method] === 'function');
     });
     

@@ -3,6 +3,8 @@
  * WebRTC signaling via Nostr events with heartbeat and signature verification
  */
 
+import { ShuntCallCrypto } from './crypto.js';
+
 const EVENT_KIND = 33333;
 const HEARTBEAT_INTERVAL = 15000;
 const PEER_TIMEOUT = 45000;
@@ -21,7 +23,7 @@ const NostrSignaling = {
   async init(roomId, password) {
     console.log('NostrSignaling: Initializing with roomId:', roomId);
     try {
-      this.roomTag = await this.computeRoomTag(roomId, password);
+      this.roomTag = await ShuntCallCrypto.deriveNamespace(roomId, password);
       console.log('NostrSignaling: Room tag:', this.roomTag);
       
       this.nostr = Nostr;
@@ -37,15 +39,6 @@ const NostrSignaling = {
       console.error('NostrSignaling: Initialization error', error);
       throw error;
     }
-  },
-
-  async computeRoomTag(roomId, password) {
-    const input = roomId + ':' + password;
-    const encoder = new TextEncoder();
-    const data = encoder.encode(input);
-    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
   },
 
    setupSubscriptions() {
@@ -384,13 +377,6 @@ const NostrSignaling = {
       console.error('NostrSignaling: Send ICE candidate error', error);
       throw error;
     }
-  },
-
-  /**
-   * Get list of known active peers
-   */
-  getKnownPeers() {
-    return { ...this.knownPeers };
   },
 
   on(event, callback) {

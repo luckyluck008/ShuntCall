@@ -68,12 +68,6 @@ const ShuntCallWebRTC = {
     console.log('TURN servers enabled for NAT traversal');
   },
 
-  disableTurn() {
-    this.turnEnabled = false;
-    this.config.iceServers = ICE_SERVERS;
-    console.log('TURN servers disabled');
-  },
-
   setupLocalStreamTrackListeners(stream) {
     // Listen for new tracks being added to local stream
     stream.onaddtrack = (event) => {
@@ -459,9 +453,6 @@ const ShuntCallWebRTC = {
     return pc.localDescription;
   },
 
-
-
-
    handleConnectionStateChange(pc) {
     console.log(`Peer ${pc.peerId?.slice(0, 16)} connection state:`, pc.connectionState);
     
@@ -626,12 +617,6 @@ const ShuntCallWebRTC = {
     });
   },
 
-  async getStats(peerId) {
-    const pc = this.peerConnections[peerId];
-    if (!pc) return null;
-    return pc.getStats();
-  },
-
   getAllConnections() {
     return { ...this.peerConnections };
   },
@@ -661,22 +646,6 @@ const ShuntCallWebRTC = {
     });
     this.remoteStreams = {};
     this.dataChannels = {};
-  },
-
-  addLocalStream(stream) {
-    this.localStream = stream;
-    this.setupLocalStreamTrackListeners(stream);
-    
-    Object.values(this.peerConnections).forEach(pc => {
-      stream.getTracks().forEach(track => {
-        const sender = pc.getSenders().find(s => s.track?.kind === track.kind);
-        if (sender) {
-          sender.replaceTrack(track);
-        } else {
-          pc.addTrack(track, stream);
-        }
-      });
-    });
   },
 
   addLocalTrack(track, stream) {
@@ -711,82 +680,9 @@ const ShuntCallWebRTC = {
     this.emit('localTrackRemoved', { track, kind: track.kind });
   },
 
-  getRemoteTracks(peerId) {
-    const pc = this.peerConnections[peerId];
-    if (!pc) return [];
-    
-    const tracks = [];
-    pc.getReceivers().forEach(receiver => {
-      if (receiver.track) {
-        tracks.push(receiver.track);
-      }
-    });
-    return tracks;
-  },
-
   getLocalTracks() {
     if (!this.localStream) return [];
     return this.localStream.getTracks();
-  },
-
-  async replaceTrackForAllPeers(oldTrack, newTrack) {
-    let success = false;
-    for (const [peerId, pc] of Object.entries(this.peerConnections)) {
-      try {
-        const sender = pc.getSenders().find(s => s.track === oldTrack || s.track?.kind === newTrack.kind);
-        if (sender) {
-          await sender.replaceTrack(newTrack);
-          console.log('Track replaced for peer:', peerId.slice(0, 16));
-          success = true;
-        } else {
-          pc.addTrack(newTrack, this.localStream);
-          console.log('Track added for peer:', peerId.slice(0, 16));
-          success = true;
-        }
-      } catch (error) {
-        console.error('Failed to replace track for peer:', peerId.slice(0, 16), error);
-      }
-    }
-    return success;
-  },
-
-  async replaceTrack(peerId, oldTrack, newTrack) {
-    const pc = this.peerConnections[peerId];
-    if (!pc) {
-      console.warn('No peer connection found for track replacement:', peerId);
-      return false;
-    }
-    
-    try {
-      const sender = pc.getSenders().find(s => s.track === oldTrack);
-      if (sender) {
-        await sender.replaceTrack(newTrack);
-        console.log('Track replaced successfully for peer:', peerId.slice(0, 16));
-        return true;
-      }
-      
-      // If old track not found, try to find by kind
-      const kindSender = pc.getSenders().find(s => s.track?.kind === newTrack.kind);
-      if (kindSender) {
-        await kindSender.replaceTrack(newTrack);
-        console.log('Track replaced by kind successfully for peer:', peerId.slice(0, 16));
-        return true;
-      }
-      
-      // If no sender found, add as new track
-      pc.addTrack(newTrack, this.localStream);
-      console.log('New track added successfully for peer:', peerId.slice(0, 16));
-      return true;
-    } catch (error) {
-      console.error('Failed to replace track:', error);
-      this.emit('trackError', {
-        peerId,
-        track: oldTrack,
-        kind: oldTrack?.kind || newTrack.kind,
-        error
-      });
-      return false;
-    }
   },
 
   setupDataChannel(channel, peerId) {
@@ -844,11 +740,6 @@ const ShuntCallWebRTC = {
       if (this.sendData(peerId, data)) sent++;
     });
     return sent;
-  },
-
-  getDataChannelState(peerId) {
-    const channel = this.dataChannels[peerId];
-    return channel ? channel.readyState : null;
   },
 
   on(event, callback) {
@@ -999,10 +890,6 @@ const ShuntCallWebRTC = {
     }
     
     return { changed: false, quality: this.currentVideoQuality, rtt: rttMs, loss: avgPacketLoss };
-  },
-
-  getQualitySettings(quality) {
-    return this.videoQualityMap[quality] || null;
   },
 
   destroy() {

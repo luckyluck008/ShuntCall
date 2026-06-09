@@ -40,19 +40,6 @@ test.describe('Bug Fix: handleTrackFailure Logic', () => {
   });
 });
 
-test.describe('Bug Fix: replaceTrackForAllPeers', () => {
-  test('webrtc.js has replaceTrackForAllPeers method', () => {
-    const webrtc = fs.readFileSync('js/webrtc.js', 'utf-8');
-    expect(webrtc).toContain('replaceTrackForAllPeers');
-  });
-
-  test('room.html uses replaceTrackForAllPeers instead of replaceTrack(null, ...)', () => {
-    const room = fs.readFileSync('room.html', 'utf-8');
-    expect(room).toContain('replaceTrackForAllPeers');
-    expect(room).not.toMatch(/replaceTrack\(null,/);
-  });
-});
-
 test.describe('Bug Fix: ICE Candidate Buffer Race Condition', () => {
   test('handleIceCandidate initializes buffer before pushing', () => {
     const webrtc = fs.readFileSync('js/webrtc.js', 'utf-8');
@@ -107,7 +94,6 @@ test.describe('Feature: TURN Server Support', () => {
     expect(webrtc).toContain('PUBLIC_TURN_SERVERS');
     expect(webrtc).toContain('turn:');
     expect(webrtc).toContain('enableTurn');
-    expect(webrtc).toContain('disableTurn');
   });
 
   test('TURN is enabled on reconnect attempts', () => {
@@ -338,11 +324,6 @@ test.describe('Feature: Nostr Relay Health Check', () => {
     expect(nostr).toContain('reconnects');
   });
 
-  test('nostr.js has getHealthyRelays method', () => {
-    const nostr = fs.readFileSync('js/nostr.js', 'utf-8');
-    expect(nostr).toContain('getHealthyRelays');
-  });
-
   test('getStatus includes relay health', () => {
     const nostr = fs.readFileSync('js/nostr.js', 'utf-8');
     expect(nostr).toContain('relayHealth: { ...this.relayHealth }');
@@ -439,13 +420,10 @@ test.describe('Integration: WebRTC Module', () => {
         handleOffer: typeof w.handleOffer,
         handleAnswer: typeof w.handleAnswer,
         handleIceCandidate: typeof w.handleIceCandidate,
-        replaceTrack: typeof w.replaceTrack,
-        replaceTrackForAllPeers: typeof w.replaceTrackForAllPeers,
         addLocalTrack: typeof w.addLocalTrack,
         removeLocalTrack: typeof w.removeLocalTrack,
         setVideoQuality: typeof w.setVideoQuality,
         enableTurn: typeof w.enableTurn,
-        disableTurn: typeof w.disableTurn,
         verifyTracks: typeof w.verifyTracks,
         handleTrackFailure: typeof w.handleTrackFailure
       };
@@ -504,7 +482,6 @@ test.describe('Integration: NostrSignaling Module', () => {
         setNickname: typeof ns.setNickname,
         sendHeartbeat: typeof ns.sendHeartbeat,
         verifyEventSignature: typeof ns.verifyEventSignature,
-        getKnownPeers: typeof ns.getKnownPeers,
         getStatus: typeof ns.getStatus,
         destroy: typeof ns.destroy
       };

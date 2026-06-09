@@ -51,6 +51,40 @@ const ShuntCallCrypto = {
    */
   isValidRoomId(roomId) {
     return /^[a-zA-Z0-9_-]+$/.test(roomId) && roomId.length >= 3 && roomId.length <= 32;
+  },
+
+  /**
+   * Check if the current context is secure (HTTPS or localhost)
+   * @returns {boolean} - True if secure context
+   */
+  isSecureContext() {
+    return window.location.protocol === 'https:' ||
+           window.location.hostname === 'localhost' ||
+           window.location.hostname === '127.0.0.1';
+  },
+
+  /**
+   * Calculate password strength score, label, color and entropy
+   * @param {string} password - The password to evaluate
+   * @returns {object} - { score, label, color, entropy }
+   */
+  calculatePasswordStrength(password) {
+    if (!password) return { score: 0, label: '', color: '#333', entropy: 0 };
+    let score = 0;
+    if (password.length >= 8) score++;
+    if (password.length >= 12) score++;
+    if (password.length >= 16) score++;
+    if (/[a-z]/.test(password) && /[A-Z]/.test(password)) score++;
+    if (/\d/.test(password)) score++;
+    if (/[^a-zA-Z0-9]/.test(password)) score++;
+    const charsetSize = (/[a-z]/.test(password) ? 26 : 0) + (/[A-Z]/.test(password) ? 26 : 0) + (/\d/.test(password) ? 10 : 0) + (/[^a-zA-Z0-9]/.test(password) ? 32 : 0);
+    const entropy = password.length * Math.log2(charsetSize || 1);
+    if (entropy >= 60) score++;
+    if (entropy >= 80) score++;
+    const labels = ['Very Weak', 'Weak', 'Fair', 'Good', 'Strong', 'Very Strong'];
+    const colors = ['#ef4444', '#f97316', '#eab308', '#84cc16', '#22c55e', '#10b981'];
+    const idx = Math.min(Math.floor(score / 1.5), labels.length - 1);
+    return { score: Math.min(score, 9), label: labels[idx], color: colors[idx], entropy: Math.round(entropy) };
   }
 };
 

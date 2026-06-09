@@ -104,7 +104,6 @@ test.describe('Basic Media and Connection Tests', () => {
       return typeof window.ShuntCallWebRTC === 'object' &&
              typeof window.ShuntCallWebRTC.init === 'function' &&
              typeof window.ShuntCallWebRTC.createPeerConnection === 'function' &&
-             typeof window.ShuntCallWebRTC.addLocalStream === 'function' &&
              typeof window.ShuntCallWebRTC.verifyTracks === 'function' &&
              typeof window.ShuntCallWebRTC.handleTrackFailure === 'function';
     });
